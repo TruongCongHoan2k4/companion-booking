@@ -1,0 +1,12 @@
+{
+  "name": "companion-booking",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Fullstack companion booking — chạy backend + frontend cùng lúc",
+  "scripts": {
+    "dev:all": "concurrently -n backend,frontend -c blue,green \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

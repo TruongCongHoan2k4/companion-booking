@@ -1,0 +1,118 @@
+1. Nghiệp vụ của USER (Người thuê)
+Đây là nhóm khách hàng trả tiền, hệ thống cần tối ưu trải nghiệm tìm kiếm, thanh toán và đảm bảo quyền lợi cho họ.
+
+Quản lý tài khoản & Ví:
+
+Đăng ký/Đăng nhập (Qua SĐT, Google, Apple ID).
+
+Nạp tiền vào ví điện tử nội bộ (qua MoMo, VNPay, Chuyển khoản).
+
+Quản lý lịch sử giao dịch (nạp tiền, trừ tiền cọc, hoàn tiền).
+
+Tìm kiếm & Đặt lịch (Booking):
+
+Lọc Companion theo: Dịch vụ (Game/Outing), khu vực, giá tiền, giới tính, kỹ năng (mức rank game), trạng thái Online.
+
+Xem Profile Companion (Ảnh, video, đánh giá, tỷ lệ phản hồi).
+
+Gửi yêu cầu đặt lịch (Booking Request) kèm thông tin: thời gian, địa điểm, ghi chú.
+
+Giao tiếp an toàn:
+
+Chat hoặc Call (VoIP) nội bộ trên web/app với Companion trước và trong thời gian thuê (để bảo mật số điện thoại thật).
+
+Thực hiện dịch vụ:
+
+Nhận thông báo khi Companion chấp nhận đơn.
+
+Hệ thống tự động trừ tiền trong ví (Hold tiền cọc) khi đơn được xác nhận.
+
+Xác nhận "Bắt đầu" (Check-in) khi gặp mặt/vào game và "Kết thúc" (Check-out).
+
+Yêu cầu gia hạn thêm giờ trực tiếp trên hệ thống (nếu ví còn đủ tiền).
+
+Đánh giá & Khiếu nại:
+
+Đánh giá sao (Rating) và viết nhận xét (Review) sau khi hoàn thành.
+
+Báo cáo (Report) hoặc bấm SOS nếu có vấn đề: Companion không giống ảnh, đi trễ, quấy rối, thái độ không tốt.
+
+Hủy đơn (Quy trình hủy tuân theo chính sách hoàn tiền).
+
+2. Nghiệp vụ của COMPANION (Bạn đồng hành)
+Đây là người cung cấp dịch vụ. Giao diện của họ (Dashboard) tập trung vào quản lý lịch biểu, đơn hàng và thu nhập.
+
+Hồ sơ định danh (eKYC) & Tự quảng bá:
+
+Cung cấp giấy tờ định danh (CCCD/CMND) và ảnh chân dung thật để hệ thống xác thực.
+
+Tải lên Album ảnh/Video giới thiệu bản thân (chờ Admin duyệt).
+
+Thiết lập kỹ năng, dịch vụ cung cấp và tự thiết lập Bảng giá (theo giờ/gói).
+
+Quản lý Lịch biểu & Trạng thái:
+
+Bật/Tắt trạng thái Online để sẵn sàng nhận đơn.
+
+Cài đặt khung giờ trống trên Lịch (Calendar) để User biết đường đặt.
+
+Xử lý Đơn hàng (Booking Workflow):
+
+Nhận thông báo khi có đơn yêu cầu mới.
+
+Chấp nhận (Accept) hoặc Từ chối (Decline) đơn trong thời gian giới hạn (VD: 10 phút).
+
+Theo dõi danh sách đơn: Chờ xử lý, Sắp diễn ra, Đang chạy, Đã xong.
+
+Thực hiện dịch vụ & An toàn:
+
+Bấm Check-in (Bắt đầu) và Check-out (Kết thúc).
+
+Đánh giá lại User (Rate User) để cảnh báo cho các Companion khác.
+
+Quản lý Tài chính:
+
+Xem thống kê thu nhập, số tiền khả dụng và số tiền đang bị hệ thống Hold (đang chờ đối soát sau khi đơn kết thúc).
+
+Tạo lệnh Rút tiền (Withdraw) về tài khoản ngân hàng cá nhân.
+
+3. Nghiệp vụ của ADMIN (Quản trị viên)
+Đây là bộ não điều hành hệ thống, chịu trách nhiệm về dòng tiền, an toàn cộng đồng và giải quyết tranh chấp.
+
+Kiểm duyệt Nội dung (Moderation):
+
+Duyệt hồ sơ đăng ký của Companion: Khớp hình ảnh với CCCD (Cấp tích xanh Verified).
+
+Duyệt ảnh/video mới của Companion để đảm bảo không vi phạm thuần phong mỹ tục.
+
+Duyệt các bài Review, có quyền ẩn bình luận chửi thề, spam.
+
+Quản lý Giao dịch & Dòng tiền:
+
+Thiết lập tỷ lệ hoa hồng (Commission rate) hệ thống thu trên mỗi đơn.
+
+Duyệt lệnh rút tiền của Companion (Thủ công hoặc thiết lập tự động hóa).
+
+Xử lý lệnh nạp tiền bị lỗi của User.
+
+Xử lý Tranh chấp (Dispute Resolution):
+
+Tiếp nhận các báo cáo (Report/SOS) từ User hoặc Companion.
+
+Đóng băng tiền (Freeze Escrow) của đơn hàng đang có tranh chấp.
+
+Truy xuất lịch sử chat, thời gian check-in/out để làm bằng chứng.
+
+Ra quyết định cuối cùng: Hoàn tiền (Refund) cho User hoặc Trả tiền (Payout) cho Companion.
+
+Quản lý Người dùng (User Management):
+
+Khóa tài khoản (Ban) hoặc Cảnh cáo (Warn) đối với User/Companion vi phạm quy tắc.
+
+Hỗ trợ cấp lại mật khẩu, thay đổi thông tin nhạy cảm (SĐT).
+
+Báo cáo & Phân tích (Analytics):
+
+Xem biểu đồ doanh thu tổng của nền tảng (Platform Profit).
+
+Thống kê số lượng giao dịch, đơn hủy, từ khóa tìm kiếm phổ biến.

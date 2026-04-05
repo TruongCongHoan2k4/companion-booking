@@ -1,0 +1,19 @@
+[
+  {
+    "id": "507f1f77bcf86cd799439011",
+    "user": {
+      "id": "507f191e810c19729de860ea",
+      "fullName": "E2E Companion",
+      "username": "e2e_companion"
+    },
+    "bio": "Hồ sơ phục vụ kiểm thử E2E.",
+    "hobbies": "Âm nhạc, cà phê",
+    "averageRating": 4.8,
+    "reviewCount": 12,
+    "onlineStatus": true,
+    "serviceType": "Đồng hành",
+    "area": "Hà Nội",
+    "pricePerHour": "200000",
+    "avatarUrl": "https://placehold.co/320x200/6366f1/ffffff/png?text=E2E"
+  }
+]
