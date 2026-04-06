@@ -1252,8 +1252,72 @@ async function bootstrap() {
   try {
     const authUserEl = document.getElementById('auth-user');
     if (authUserEl) {
-      authUserEl.textContent = `Xin chào, ${auth.username}`;
+      const myName = auth.user?.fullName || auth.username || auth.user?.username || '';
+      authUserEl.textContent = myName ? `Xin chào, ${myName}` : `Xin chào, ${auth.username || ''}`;
     }
+
+    // Tab "Cài đặt tài khoản" (companion/profile.html): điền đủ thông tin + cho phép cập nhật.
+    const accountFullNameEl = document.getElementById('account-fullname');
+    const accountContactEl = document.getElementById('account-contact');
+    if (accountFullNameEl) {
+      accountFullNameEl.value = auth.user?.fullName || '';
+    }
+    if (accountContactEl) {
+      const email = auth.user?.email || '';
+      const phone = auth.user?.phoneNumber || '';
+      accountContactEl.value = [email, phone].filter(Boolean).join(' • ') || email || phone || '';
+    }
+    const accountForm = document.getElementById('account-form');
+    if (accountForm) {
+      accountForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fullName = (document.getElementById('account-fullname')?.value || '').trim();
+        const currentPassword = document.getElementById('current-password')?.value || '';
+        const newPassword = document.getElementById('new-password')?.value || '';
+        const confirmPassword = document.getElementById('confirm-password')?.value || '';
+
+        try {
+          // cập nhật tên hiển thị (không bắt buộc đổi mật khẩu)
+          if (fullName && fullName !== (auth.user?.fullName || '')) {
+            await getJson('/api/auth/me', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ fullName }),
+            });
+            auth.user.fullName = fullName;
+            if (authUserEl) authUserEl.textContent = `Xin chào, ${fullName}`;
+          }
+
+          // đổi mật khẩu nếu user nhập
+          const wantsChange =
+            (currentPassword && newPassword) || (currentPassword && confirmPassword) || (newPassword && confirmPassword);
+          if (wantsChange) {
+            if (!currentPassword || !newPassword) {
+              throw new Error('Vui lòng nhập mật khẩu hiện tại và mật khẩu mới.');
+            }
+            if (newPassword.length < 6) {
+              throw new Error('Mật khẩu mới phải từ 6 ký tự trở lên.');
+            }
+            if (newPassword !== confirmPassword) {
+              throw new Error('Xác nhận mật khẩu không khớp.');
+            }
+            await getJson('/api/auth/change-password', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ currentPassword, newPassword }),
+            });
+            document.getElementById('current-password').value = '';
+            document.getElementById('new-password').value = '';
+            document.getElementById('confirm-password').value = '';
+          }
+
+          showAlert('Đã cập nhật tài khoản.');
+        } catch (err) {
+          showAlert(err.message || 'Không thể cập nhật tài khoản.', 'danger');
+        }
+      });
+    }
+
     await pollCompanionRealtimeNotifications();
     if (auth.userId && window.RealtimeStomp) {
       try {

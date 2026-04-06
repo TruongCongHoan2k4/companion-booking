@@ -68,7 +68,7 @@
               <p class="text-muted small mb-0">Gửi yêu cầu duyệt Companion</p>
             </div>
           </div>
-          <form id="register-form" class="row g-3 mt-1">
+          <form id="register-form" class="row g-3 mt-1" enctype="multipart/form-data">
             <div class="col-12">
               <label for="bio" class="form-label">
                 <i class="bi bi-person-lines-fill me-1"></i>
@@ -102,6 +102,84 @@
                 Thông tin lịch rảnh tổng quan
               </label>
               <input id="availability" class="form-control" placeholder="VD: Tối 2-6, 18:00 - 22:00" />
+            </div>
+            <div class="col-md-6">
+              <label for="serviceType" class="form-label">
+                <i class="bi bi-tag me-1"></i>
+                Loại dịch vụ
+              </label>
+              <input id="serviceType" class="form-control" placeholder="VD: Masseur / Stream / Chơi game..." />
+            </div>
+            <div class="col-md-6">
+              <label for="area" class="form-label">
+                <i class="bi bi-geo-alt me-1"></i>
+                Khu vực thuê
+              </label>
+              <input id="area" class="form-control" placeholder="VD: TP.HCM, Quận 1; Hà Nội, Cầu Giấy" />
+            </div>
+            <div class="col-12">
+              <label for="rentalVenues" class="form-label">
+                <i class="bi bi-building me-1"></i>
+                Danh sách nơi thuê (mỗi dòng một lựa chọn)
+              </label>
+              <textarea id="rentalVenues" class="form-control" rows="4" placeholder="Ví dụ:\nQuán cafe ABC\nCông viên XYZ"></textarea>
+            </div>
+            <div class="col-md-6">
+              <label for="gender" class="form-label">
+                <i class="bi bi-gender-ambiguous me-1"></i>
+                Giới tính
+              </label>
+              <input id="gender" class="form-control" placeholder="VD: Nam/Nữ/Khác" />
+            </div>
+            <div class="col-md-6">
+              <label for="gameRank" class="form-label">
+                <i class="bi bi-controller me-1"></i>
+                Game rank (nếu có)
+              </label>
+              <input id="gameRank" class="form-control" placeholder="VD: Diamond / Master..." />
+            </div>
+            <div class="col-md-6">
+              <label for="identityNumber" class="form-label">
+                <i class="bi bi-card-text me-1"></i>
+                Số CCCD/CMND
+              </label>
+              <input id="identityNumber" class="form-control" />
+            </div>
+            <div class="col-md-6 form-check form-switch pt-4">
+              <input class="form-check-input" type="checkbox" id="onlineStatus" />
+              <label class="form-check-label fw-semibold" for="onlineStatus">
+                <i class="bi bi-wifi me-1"></i>
+                Bật trạng thái Online
+              </label>
+            </div>
+            <div class="col-md-6">
+              <label for="identityImage" class="form-label">
+                <i class="bi bi-image me-1"></i>
+                Ảnh CCCD/CMND
+              </label>
+              <input type="file" id="identityImage" class="form-control" accept="image/*" />
+            </div>
+            <div class="col-md-6">
+              <label for="portraitImage" class="form-label">
+                <i class="bi bi-camera me-1"></i>
+                Ảnh chân dung
+              </label>
+              <input type="file" id="portraitImage" class="form-control" accept="image/*" />
+            </div>
+            <div class="col-12">
+              <label for="introMedia" class="form-label">
+                <i class="bi bi-collection me-1"></i>
+                Album ảnh / video giới thiệu
+              </label>
+              <input type="file" id="introMedia" class="form-control" accept="image/*,video/*" multiple />
+              <div class="form-text">Có thể chọn nhiều file.</div>
+            </div>
+            <div class="col-12">
+              <label for="skills" class="form-label">
+                <i class="bi bi-tools me-1"></i>
+                Kỹ năng / Dịch vụ cung cấp
+              </label>
+              <textarea id="skills" class="form-control" rows="2" placeholder="VD: trò chuyện, chơi game, massage..."></textarea>
             </div>
             <div class="col-12 mt-3">
               <button class="btn btn-primary btn-lg" type="submit">

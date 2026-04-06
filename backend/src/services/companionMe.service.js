@@ -164,6 +164,11 @@ const PROFILE_FIELDS = [
 ];
 
 export async function updateCompanionProfile(companionDoc, body) {
+  // Khi companion chỉnh sửa hồ sơ → yêu cầu admin duyệt lại.
+  if (companionDoc.status === 'APPROVED') {
+    companionDoc.status = 'PENDING';
+    companionDoc.onlineStatus = false;
+  }
   for (const key of PROFILE_FIELDS) {
     if (body[key] === undefined) continue;
     if (key === 'onlineStatus') {
@@ -178,6 +183,11 @@ export async function updateCompanionProfile(companionDoc, body) {
 }
 
 export async function updateCompanionMediaSkills(companionDoc, body) {
+  // Cập nhật media/kỹ năng cũng cần duyệt lại.
+  if (companionDoc.status === 'APPROVED') {
+    companionDoc.status = 'PENDING';
+    companionDoc.onlineStatus = false;
+  }
   if (body.introMediaUrls !== undefined) {
     companionDoc.introMediaUrls = body.introMediaUrls == null ? undefined : String(body.introMediaUrls).trim();
   }

@@ -49,3 +49,25 @@ export const registerCompanion = async (req, res) => {
     handleError(res, err);
   }
 };
+
+export const applicationMe = async (req, res) => {
+  try {
+    const data = await companionCatalogService.getMyCompanionApplication(req.auth.userId);
+    res.json(data);
+  } catch (err) {
+    handleError(res, err);
+  }
+};
+
+export const applicationIdentity = async (req, res) => {
+  try {
+    const data = await companionCatalogService.updateMyCompanionApplicationIdentity(
+      req.auth.userId,
+      req.body || {},
+      req.files || {}
+    );
+    res.json(data);
+  } catch (err) {
+    handleError(res, err);
+  }
+};
