@@ -3,6 +3,7 @@ import Booking from '../models/booking.model.js';
 import Companion from '../models/companion.model.js';
 import User from '../models/user.model.js';
 import WalletTransaction from '../models/walletTransaction.model.js';
+import * as bookingNotify from './bookingNotify.service.js';
 import {
   bigIntToDecimal128,
   decimal128ToBigInt,
@@ -34,6 +35,23 @@ export function serializeBooking(doc) {
 }
 
 export async function createBooking(customerUserId, payload) {
+  // Mỗi user chỉ được có 1 booking đang hoạt động tại một thời điểm.
+  // "Đang hoạt động" = chưa kết thúc: PENDING/ACCEPTED/IN_PROGRESS.
+  // (COMPLETED/REJECTED/CANCELLED được xem là đã kết thúc)
+  const existing = await Booking.findOne({
+    customer: customerUserId,
+    status: { $in: ['PENDING', 'ACCEPTED', 'IN_PROGRESS'] },
+  })
+    .sort({ createdAt: -1 })
+    .select('_id status')
+    .lean();
+  if (existing) {
+    const err = new Error('Bạn đang có 1 đơn chưa kết thúc. Vui lòng hoàn tất/hủy đơn hiện tại trước khi đặt đơn mới.');
+    err.status = 400;
+    err.code = 'ACTIVE_BOOKING_EXISTS';
+    throw err;
+  }
+
   // Fallback mode: không dùng transaction nếu MongoDB không phải replica set.
   // Dev/local vẫn chạy được, đổi lại không còn atomicity (chấp nhận cho môi trường dev).
   async function createBookingNoTxn() {
@@ -354,10 +372,34 @@ export async function checkInBooking(userId, role, bookingId) {
     err.status = 400;
     throw err;
   }
+  if (!['CUSTOMER', 'COMPANION'].includes(role)) {
+    const err = new Error('Vai trò không hợp lệ.');
+    err.status = 400;
+    throw err;
+  }
+
+  const now = new Date();
+  // Nếu chưa có yêu cầu, tạo yêu cầu từ phía gọi.
+  if (!booking.checkInRequestedBy || !booking.checkInRequestedAt) {
+    booking.checkInRequestedBy = role;
+    booking.checkInRequestedAt = now;
+    await booking.save();
+    void bookingNotify.notifyCheckInRequested(booking, role);
+    return { step: 'REQUESTED', booking: serializeBooking(booking) };
+  }
+
+  // Nếu đã có yêu cầu từ cùng phía → không làm gì thêm.
+  if (booking.checkInRequestedBy === role) {
+    return { step: 'REQUESTED', booking: serializeBooking(booking) };
+  }
+
+  // Yêu cầu đã có từ phía còn lại → xác nhận và bắt đầu phiên.
+  booking.checkInConfirmedAt = now;
   booking.status = 'IN_PROGRESS';
-  booking.startedAt = new Date();
+  booking.startedAt = now;
   await booking.save();
-  return serializeBooking(booking);
+  void bookingNotify.notifyCheckInConfirmed(booking);
+  return { step: 'CONFIRMED', booking: serializeBooking(booking) };
 }
 
 export async function checkOutBooking(userId, role, bookingId) {
@@ -367,10 +409,31 @@ export async function checkOutBooking(userId, role, bookingId) {
     err.status = 400;
     throw err;
   }
+  if (!['CUSTOMER', 'COMPANION'].includes(role)) {
+    const err = new Error('Vai trò không hợp lệ.');
+    err.status = 400;
+    throw err;
+  }
+
+  const now = new Date();
+  if (!booking.checkOutRequestedBy || !booking.checkOutRequestedAt) {
+    booking.checkOutRequestedBy = role;
+    booking.checkOutRequestedAt = now;
+    await booking.save();
+    void bookingNotify.notifyCheckOutRequested(booking, role);
+    return { step: 'REQUESTED', booking: serializeBooking(booking) };
+  }
+
+  if (booking.checkOutRequestedBy === role) {
+    return { step: 'REQUESTED', booking: serializeBooking(booking) };
+  }
+
+  booking.checkOutConfirmedAt = now;
   booking.status = 'COMPLETED';
-  booking.completedAt = new Date();
+  booking.completedAt = now;
   await booking.save();
-  return serializeBooking(booking);
+  void bookingNotify.notifyCheckOutConfirmed(booking);
+  return { step: 'CONFIRMED', booking: serializeBooking(booking) };
 }
 
 export async function cancelBooking(userId, role, bookingId) {
@@ -433,6 +496,7 @@ export async function requestBookingExtension(customerUserId, bookingId, extraMi
   booking.pendingExtensionMinutes = extra;
   booking.extensionRequestedAt = new Date();
   await booking.save();
+  void bookingNotify.notifyExtensionRequested(booking);
   return serializeBooking(booking);
 }
 
@@ -479,6 +543,7 @@ export async function companionDecideExtension(companionUserId, bookingId, decis
     booking.duration = Number(booking.duration || 0) + pending;
   }
   await booking.save();
+  void bookingNotify.notifyExtensionDecided(booking, decision);
   return serializeBooking(booking);
 }
 

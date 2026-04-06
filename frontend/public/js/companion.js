@@ -34,25 +34,59 @@ function escapeHtml(value) {
 }
 
 function showAlert(message, type = 'success') {
-  const box = document.getElementById('alert-box');
-  if (!box) return;
+  // Toast góc phải màn hình, slide-in từ phải qua, tự biến mất sau vài giây.
+  const id = 'cb-toast-container';
+  let container = document.getElementById(id);
+  if (!container) {
+    container = document.createElement('div');
+    container.id = id;
+    container.className = 'toast-container position-fixed top-0 end-0 p-3';
+    container.style.zIndex = '1080';
+    document.body.appendChild(container);
+  }
+
+  if (!document.getElementById('cb-toast-style')) {
+    const style = document.createElement('style');
+    style.id = 'cb-toast-style';
+    style.textContent = `
+      @keyframes cbToastIn { from { transform: translateX(110%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+      @keyframes cbToastOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(110%); opacity: 0; } }
+      .cb-toast { animation: cbToastIn .28s ease-out; }
+      .cb-toast.cb-hide { animation: cbToastOut .22s ease-in forwards; }
+    `;
+    document.head.appendChild(style);
+  }
 
   const toastEl = document.createElement('div');
-  toastEl.className = `toast text-bg-${type}`;
+  toastEl.className = `toast align-items-center text-bg-${type} border-0 cb-toast`;
   toastEl.setAttribute('role', 'alert');
   toastEl.setAttribute('aria-live', 'assertive');
   toastEl.setAttribute('aria-atomic', 'true');
   toastEl.innerHTML = `
     <div class="d-flex">
       <div class="toast-body">${escapeHtml(message)}</div>
-      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" aria-label="Close"></button>
     </div>
   `;
-  box.appendChild(toastEl);
+  container.appendChild(toastEl);
 
-  const toast = new bootstrap.Toast(toastEl, { delay: 3000, autohide: true });
-  toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove(), { once: true });
-  toast.show();
+  const closeBtn = toastEl.querySelector('button');
+  const dismiss = () => {
+    toastEl.classList.add('cb-hide');
+    setTimeout(() => toastEl.remove(), 260);
+  };
+  closeBtn?.addEventListener('click', dismiss, { once: true });
+
+  // Ưu tiên dùng Bootstrap Toast nếu có (để hỗ trợ accessibility + pause on hover),
+  // nhưng vẫn giữ animation slide-in/out theo CSS ở trên.
+  const delay = 3200;
+  if (window.bootstrap?.Toast) {
+    const toast = new bootstrap.Toast(toastEl, { delay, autohide: true });
+    toastEl.addEventListener('hidden.bs.toast', dismiss, { once: true });
+    toast.show();
+  } else {
+    setTimeout(dismiss, delay);
+  }
 }
 
 function statusBadgeClass(status) {
@@ -926,6 +960,51 @@ async function loadBookings() {
   const rows = document.getElementById('booking-body');
   const bookings = await getJson('/api/companions/me/bookings');
   rows.innerHTML = '';
+
+  // Realtime: join room cho các booking đang active để thấy check-in/out từ khách theo thời gian thực.
+  if (window.RealtimeStomp && typeof RealtimeStomp.subscribeBookingStatus === 'function') {
+    try {
+      await RealtimeStomp.ensureLibs();
+      await RealtimeStomp.connect();
+      const active = (Array.isArray(bookings) ? bookings : []).filter((b) => ['ACCEPTED', 'IN_PROGRESS'].includes(b.status));
+      const seen = new Set(active.slice(0, 12).map((b) => String(b.id || b._id)));
+      if (!window.__compBookingSubs) window.__compBookingSubs = new Map();
+      for (const [bid, sub] of window.__compBookingSubs.entries()) {
+        if (!seen.has(bid)) {
+          try {
+            sub?.unsubscribe?.();
+          } catch (_) {}
+          window.__compBookingSubs.delete(bid);
+        }
+      }
+      for (const bid of seen) {
+        if (window.__compBookingSubs.has(bid)) continue;
+        const sub = await RealtimeStomp.subscribeBookingStatus(bid, async (evt) => {
+          const e = evt || {};
+          const isSelf =
+            (e.event === 'checkin_requested' && e.requestedBy === 'COMPANION') ||
+            (e.event === 'checkout_requested' && e.requestedBy === 'COMPANION');
+          const map = {
+            checkin_requested: isSelf ? 'Bạn đã gửi yêu cầu check-in' : 'Khách yêu cầu check-in',
+            checkin_confirmed: 'Check-in đã được xác nhận',
+            checkout_requested: isSelf ? 'Bạn đã gửi yêu cầu check-out' : 'Khách yêu cầu check-out',
+            checkout_confirmed: 'Check-out đã được xác nhận',
+            extension_requested: `Khách xin gia hạn +${Number(e.extraMinutes || 30)} phút`,
+            extension_accepted: 'Bạn đã chấp nhận gia hạn',
+            extension_rejected: 'Bạn đã từ chối gia hạn',
+          };
+          showAlert(map[e.event] || 'Cập nhật booking', 'info');
+          await loadBookings();
+          await loadBookingWorkflow();
+          await loadIncomeStats();
+        });
+        window.__compBookingSubs.set(bid, sub);
+      }
+    } catch (e) {
+      console.warn('Booking realtime không khả dụng', e);
+    }
+  }
+
   if (!bookings.length) {
     rows.innerHTML = '<tr><td colspan="6" class="text-muted">Chưa có booking.</td></tr>';
     return;
@@ -962,7 +1041,7 @@ async function loadBookings() {
                 }
                 ${canCheckIn ? `<button class="btn btn-sm btn-outline-primary me-2" data-action="checkin">Check-in</button>` : ''}
                 ${canCheckOut ? `<button class="btn btn-sm btn-outline-success me-2" data-action="checkout">Check-out</button>` : ''}
-                ${canChat ? `<a class="btn btn-sm btn-outline-dark me-2" href="../user/chat.html?bookingId=${item.id}">Chat/Call</a>` : ''}
+                ${canChat ? `<a class="btn btn-sm btn-outline-dark me-2" href="../companion/chat.html?bookingId=${item.id}">Chat/Call</a>` : ''}
                 ${canSos ? `<button class="btn btn-sm btn-danger" data-action="sos"><i class="bi bi-exclamation-octagon me-1"></i>SOS</button>` : ''}
             </td>`;
     if (canProcess) {
@@ -1181,7 +1260,7 @@ async function bootstrap() {
         await RealtimeStomp.ensureLibs();
         await RealtimeStomp.connect();
         await RealtimeStomp.subscribeNotifications(Number(auth.userId), (n) => {
-          const id = Number(n.id);
+          const id = String(n.id);
           if (!companionRealtimeNotifState.seenIds.has(id)) {
             companionRealtimeNotifState.seenIds.add(id);
             showCompanionNotificationToast(n);
@@ -1353,12 +1432,12 @@ function processRealtimeCompanionNotifications(list) {
     (a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0)
   );
   if (!companionRealtimeNotifState.initialized) {
-    sorted.forEach((n) => companionRealtimeNotifState.seenIds.add(Number(n.id)));
+    sorted.forEach((n) => companionRealtimeNotifState.seenIds.add(String(n.id)));
     companionRealtimeNotifState.initialized = true;
     return;
   }
   sorted.forEach((n) => {
-    const id = Number(n.id);
+    const id = String(n.id);
     if (!companionRealtimeNotifState.seenIds.has(id)) {
       companionRealtimeNotifState.seenIds.add(id);
       showCompanionNotificationToast(n);
@@ -1444,11 +1523,24 @@ async function loadCompanionNotifications() {
 async function initCompanionChatPage() {
   const bookingIdText = document.getElementById('chat-booking-id-text');
   const threadTitle = document.getElementById('chat-thread-title');
-  const threadListBox = document.getElementById('chat-thread-list');
+  const bookingSelect = document.getElementById('chat-booking-select');
   let currentBookingId = new URLSearchParams(window.location.search).get('bookingId') || '';
   let threads = [];
   let chatStompSub = null;
   let chatPollTimer = null;
+  const allowedChatStatuses = new Set(['ACCEPTED', 'IN_PROGRESS']);
+  let auth = null;
+
+  try {
+    auth = await getJson('/api/auth/me');
+  } catch (_) {
+    auth = null;
+  }
+  const myNameEl = document.getElementById('auth-user');
+  if (myNameEl && auth) {
+    const myName = auth.user?.fullName || auth.username || auth.user?.username || '';
+    myNameEl.textContent = myName ? `Xin chào, ${myName}` : 'Xin chào';
+  }
 
   async function resubscribeChatSocket() {
     if (chatStompSub && typeof chatStompSub.unsubscribe === 'function') {
@@ -1477,7 +1569,39 @@ async function initCompanionChatPage() {
     }
     const active = threads.find((t) => t.bookingId === currentBookingId);
     bookingIdText.textContent = String(currentBookingId);
-    threadTitle.textContent = active ? `Khách hàng: ${active.partnerName}` : `Booking #${currentBookingId}`;
+    threadTitle.textContent = active ? `Khách hàng: ${active.partnerName}` : 'Cuộc trò chuyện';
+  }
+
+  function renderBookingSelect() {
+    if (!bookingSelect) return;
+    const items = Array.isArray(threads) ? threads : [];
+    if (!items.length) {
+      bookingSelect.innerHTML = `<option value="">Không có cuộc chat</option>`;
+      bookingSelect.value = '';
+      bookingSelect.disabled = true;
+      return;
+    }
+    bookingSelect.disabled = false;
+    bookingSelect.innerHTML = items
+      .map((t) => {
+        const label = `${t.partnerName || 'Khách'} • ${t.status || '-'} • ${fmtDateTime(t.bookingTime) || ''}`.trim();
+        return `<option value="${escapeHtml(t.bookingId)}">${escapeHtml(label)}</option>`;
+      })
+      .join('');
+    bookingSelect.value = items.some((t) => t.bookingId === String(currentBookingId))
+      ? String(currentBookingId)
+      : items[0].bookingId;
+  }
+
+  async function switchBooking(nextId) {
+    const next = String(nextId || '').trim();
+    if (!next || next === String(currentBookingId)) return;
+    currentBookingId = next;
+    updateThreadHeader();
+    renderBookingSelect();
+    syncChatComposerState();
+    await loadMessages();
+    await resubscribeChatSocket();
   }
 
   async function loadChatThreads() {
@@ -1490,41 +1614,39 @@ async function initCompanionChatPage() {
         status: b.status || '-',
         bookingTime: b.bookingTime,
       }))
+      .filter((t) => allowedChatStatuses.has(t.status))
       .sort((a, b) => new Date(b.bookingTime || 0).getTime() - new Date(a.bookingTime || 0).getTime());
   }
 
   function resolveBookingForChat() {
-    if (currentBookingId && threads.some((t) => t.bookingId === currentBookingId)) {
-      return currentBookingId;
+    const existing = String(currentBookingId || '').trim();
+    if (existing && threads.some((t) => t.bookingId === existing)) {
+      return existing;
     }
-    const preferred = threads.find((t) => ['IN_PROGRESS', 'ACCEPTED', 'PENDING', 'COMPLETED'].includes(t.status));
-    return preferred ? preferred.bookingId : threads[0]?.bookingId || '';
+    if (!threads.length) return '';
+
+    const now = Date.now();
+    const parsed = threads.map((t) => {
+      const ts = t.bookingTime ? new Date(t.bookingTime).getTime() : NaN;
+      return { ...t, _ts: Number.isFinite(ts) ? ts : null };
+    });
+
+    const running = parsed.find((t) => t.status === 'IN_PROGRESS');
+    if (running) return running.bookingId;
+
+    const upcoming = parsed
+      .filter((t) => t.status === 'ACCEPTED' && t._ts != null && t._ts >= now)
+      .sort((a, b) => a._ts - b._ts)[0];
+    if (upcoming) return upcoming.bookingId;
+
+    const recentPast = parsed
+      .filter((t) => t.status === 'ACCEPTED' && t._ts != null)
+      .sort((a, b) => b._ts - a._ts)[0];
+    return recentPast?.bookingId || parsed[0].bookingId;
   }
 
   function renderThreadList() {
-    if (!threadListBox) return;
-    if (!threads.length) {
-      threadListBox.innerHTML = '<div class="p-3 text-muted">Chưa có cuộc trò chuyện khả dụng.</div>';
-      return;
-    }
-    threadListBox.innerHTML = `<div class="list-group list-group-flush">${threads
-      .map((t) => {
-        const active = t.bookingId === currentBookingId ? 'bg-light' : '';
-        return `<button type="button" class="list-group-item list-group-item-action border-0 border-bottom ${active} chat-thread-item" data-booking-id="${escapeHtml(t.bookingId)}">
-                        <div class="fw-semibold">${escapeHtml(t.partnerName)}</div>
-                        <div class="small text-muted">#${t.bookingId} • ${escapeHtml(t.status)}</div>
-                    </button>`;
-      })
-      .join('')}</div>`;
-    threadListBox.querySelectorAll('.chat-thread-item').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        currentBookingId = btn.getAttribute('data-booking-id') || '';
-        updateThreadHeader();
-        renderThreadList();
-        await loadMessages();
-        await resubscribeChatSocket();
-      });
-    });
+    // danh sách đã bị loại bỏ khỏi UI
   }
 
   async function loadMessages() {
@@ -1543,17 +1665,41 @@ async function initCompanionChatPage() {
     }
     box.innerHTML = list.length
       ? list
-          .map(
-            (m) => `
-            <div class="mb-2">
-                <div class="small text-muted">${escapeHtml(m.sender?.username || 'Ẩn danh')} • ${escapeHtml(fmtDateTime(m.createdAt))}</div>
-                <div class="p-2 rounded border bg-white">${escapeHtml(m.content || '')}</div>
-            </div>
-        `
-          )
+          .map((m) => {
+            const senderId = String(m.sender?.id || m.senderId || '');
+            const isMe = senderId && auth?.userId && String(senderId) === String(auth.userId);
+            const name = m.sender?.fullName || m.sender?.username || (isMe ? 'Bạn' : 'Đối phương');
+            const time = fmtDateTime(m.createdAt);
+            const bubbleClass = isMe ? 'cb-bubble cb-me' : 'cb-bubble cb-them';
+            const rowClass = isMe ? 'd-flex justify-content-end' : 'd-flex justify-content-start';
+            return `
+              <div class="${rowClass} mb-2">
+                <div class="${bubbleClass}">
+                  <div class="cb-bubble-text">${escapeHtml(m.content || '')}</div>
+                  <div class="cb-bubble-meta">${escapeHtml(name)} • ${escapeHtml(time)}</div>
+                </div>
+              </div>
+            `;
+          })
           .join('')
       : '<div class="text-muted">Chưa có tin nhắn.</div>';
     box.scrollTop = box.scrollHeight;
+  }
+
+  function syncChatComposerState() {
+    const input = document.getElementById('chat-content');
+    const form = document.getElementById('chat-form');
+    if (!input || !form) return;
+    const t = threads.find((x) => x.bookingId === String(currentBookingId));
+    const status = t?.status || '';
+    const enabled = Boolean(currentBookingId) && allowedChatStatuses.has(status);
+    input.disabled = !enabled;
+    form.querySelector('button[type="submit"]')?.toggleAttribute?.('disabled', !enabled);
+    input.placeholder = !currentBookingId
+      ? 'Chọn 1 cuộc trò chuyện để nhắn...'
+      : enabled
+        ? 'Nhập tin nhắn...'
+        : `Chat chỉ mở khi đã nhận đơn (ACCEPTED/IN_PROGRESS). Trạng thái hiện tại: ${status || '-'}`;
   }
 
   document.getElementById('chat-form')?.addEventListener('submit', async (e) => {
@@ -1562,15 +1708,33 @@ async function initCompanionChatPage() {
       showAlert('Không tìm thấy booking phù hợp để chat.', 'warning');
       return;
     }
+    const t = threads.find((x) => x.bookingId === String(currentBookingId));
+    if (!allowedChatStatuses.has(t?.status)) {
+      showAlert(`Chat đang bị khóa do trạng thái: ${t?.status || '-'}`, 'warning');
+      syncChatComposerState();
+      return;
+    }
     const input = document.getElementById('chat-content');
     const content = (input?.value || '').trim();
     if (!content) return;
     try {
-      await getJson(`/api/chat/${currentBookingId}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
-      });
+      // Ưu tiên socket realtime; fallback HTTP nếu socket lỗi/không khả dụng.
+      let sentOk = false;
+      if (window.RealtimeStomp?.sendChatMessage) {
+        try {
+          const ack = await RealtimeStomp.sendChatMessage(String(currentBookingId), content);
+          sentOk = Boolean(ack?.ok);
+        } catch (err) {
+          console.warn('send_message failed, fallback HTTP', err);
+        }
+      }
+      if (!sentOk) {
+        await getJson(`/api/chat/${currentBookingId}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content }),
+        });
+      }
       if (input) input.value = '';
       await loadMessages();
     } catch (err) {
@@ -1597,8 +1761,9 @@ async function initCompanionChatPage() {
   await loadChatThreads();
   currentBookingId = resolveBookingForChat();
   updateThreadHeader();
-  renderThreadList();
+  renderBookingSelect();
   await loadMessages();
+  syncChatComposerState();
   if (window.RealtimeStomp) {
     try {
       await RealtimeStomp.ensureLibs();
@@ -1613,6 +1778,10 @@ async function initCompanionChatPage() {
   } else {
     chatPollTimer = setInterval(loadMessages, 3000);
   }
+
+  bookingSelect?.addEventListener('change', async () => {
+    await switchBooking(bookingSelect.value);
+  });
 }
 
 document.getElementById('logout-btn').addEventListener('click', async (e) => {

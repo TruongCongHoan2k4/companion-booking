@@ -126,6 +126,64 @@
           })
       );
     },
+
+    /**
+     * Gửi tin nhắn realtime qua Socket.IO (server sẽ persist + broadcast).
+     * Fallback (nếu cần) nên dùng HTTP /api/chat/:bookingId/messages ở caller.
+     * @returns {Promise<{ ok: boolean, message?: any }>}
+     */
+    sendChatMessage(bookingId, content) {
+      const bid = String(bookingId);
+      const text = typeof content === 'string' ? content.trim() : '';
+      if (!bid || !text) {
+        return Promise.resolve({ ok: false, message: 'Thiếu bookingId hoặc nội dung.' });
+      }
+      return this.connect().then(
+        () =>
+          new Promise((resolve) => {
+            try {
+              this.socket.emit('send_message', { bookingId: bid, content: text }, (ack) => {
+                resolve(ack || { ok: false, message: 'send_message thất bại' });
+              });
+            } catch (e) {
+              resolve({ ok: false, message: e?.message || 'send_message thất bại' });
+            }
+          })
+      );
+    },
+
+    /**
+     * Realtime thay đổi trạng thái booking / sự kiện check-in/out.
+     * @returns {Promise<{ unsubscribe: function }>}
+     */
+    subscribeBookingStatus(bookingId, onMessage) {
+      const bid = String(bookingId);
+      return this.connect().then(
+        () =>
+          new Promise((resolve, reject) => {
+            this.socket.emit('join_room', { bookingId: bid }, (ack) => {
+              if (!ack || !ack.ok) {
+                reject(new Error(ack?.message || 'join_room thất bại'));
+                return;
+              }
+              const handler = (payload) => {
+                if (String(payload?.bookingId) !== bid) return;
+                try {
+                  onMessage(payload);
+                } catch (e) {
+                  console.warn('booking_status handler', e);
+                }
+              };
+              this.socket.on('booking_status', handler);
+              resolve({
+                unsubscribe: () => {
+                  this.socket?.off('booking_status', handler);
+                },
+              });
+            });
+          })
+      );
+    },
   };
 
   global.RealtimeStomp = RealtimeStomp;

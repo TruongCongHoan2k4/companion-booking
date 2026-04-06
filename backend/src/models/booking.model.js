@@ -49,6 +49,19 @@ const bookingSchema = new mongoose.Schema({
   acceptedAt: Date,
   startedAt: Date,
   completedAt: Date,
+  /** Check-in/out cần xác nhận 2 phía (khách + companion). */
+  checkInRequestedBy: {
+    type: String,
+    enum: ['CUSTOMER', 'COMPANION'],
+  },
+  checkInRequestedAt: Date,
+  checkInConfirmedAt: Date,
+  checkOutRequestedBy: {
+    type: String,
+    enum: ['CUSTOMER', 'COMPANION'],
+  },
+  checkOutRequestedAt: Date,
+  checkOutConfirmedAt: Date,
   /** Tổng số phút gia hạn đã được duyệt cho booking (từ companion). */
   extensionMinutesApproved: {
     type: Number,

@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 import User from '../models/user.model.js';
 import WalletTransaction from '../models/walletTransaction.model.js';
+import Notification from '../models/notification.model.js';
+import { publishNotification } from '../realtime/realtimeBroadcastService.js';
 import { bigIntToDecimal128, decimal128ToBigInt } from '../utils/money.util.js';
 
 function isTxnUnsupported(err) {
@@ -61,6 +63,15 @@ export async function deposit(userId, amount, provider) {
       description: 'Nạp tiền vào ví',
     });
 
+    const n = await Notification.create({
+      user: userId,
+      title: 'Nạp tiền thành công',
+      content: `Bạn đã nạp ${amt.toString()} VND vào ví.`,
+      isRead: false,
+    });
+    const full = await Notification.findById(n._id).populate('user');
+    publishNotification(full);
+
     return { walletBalance: newBal.toString() };
   }
 
@@ -91,6 +102,16 @@ export async function deposit(userId, amount, provider) {
       ],
       { session }
     );
+
+    // notification (out of transaction is ok for dev; keep it simple)
+    const n = await Notification.create({
+      user: userId,
+      title: 'Nạp tiền thành công',
+      content: `Bạn đã nạp ${amt.toString()} VND vào ví.`,
+      isRead: false,
+    });
+    const full = await Notification.findById(n._id).populate('user');
+    publishNotification(full);
 
     await session.commitTransaction();
     return { walletBalance: newBal.toString() };

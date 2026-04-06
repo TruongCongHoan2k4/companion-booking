@@ -55,8 +55,17 @@ export const getMessages = async (req, res) => {
 
 export const checkIn = async (req, res) => {
   try {
-    const booking = await bookingService.checkInBooking(req.auth.userId, req.auth.role, req.params.id);
-    res.json({ message: 'Check-in thành công.', booking });
+    const out = await bookingService.checkInBooking(req.auth.userId, req.auth.role, req.params.id);
+    const step = out?.step || 'CONFIRMED';
+    const booking = out?.booking || out;
+    res.json({
+      message:
+        step === 'REQUESTED'
+          ? 'Đã gửi yêu cầu check-in. Chờ bên còn lại xác nhận.'
+          : 'Check-in đã được xác nhận. Phiên đã bắt đầu.',
+      booking,
+      step,
+    });
   } catch (err) {
     const status = err.status || 500;
     res.status(status).json({ message: err.message || 'Check-in thất bại.' });
@@ -65,8 +74,17 @@ export const checkIn = async (req, res) => {
 
 export const checkOut = async (req, res) => {
   try {
-    const booking = await bookingService.checkOutBooking(req.auth.userId, req.auth.role, req.params.id);
-    res.json({ message: 'Check-out thành công.', booking });
+    const out = await bookingService.checkOutBooking(req.auth.userId, req.auth.role, req.params.id);
+    const step = out?.step || 'CONFIRMED';
+    const booking = out?.booking || out;
+    res.json({
+      message:
+        step === 'REQUESTED'
+          ? 'Đã gửi yêu cầu check-out. Chờ bên còn lại xác nhận.'
+          : 'Check-out đã được xác nhận. Đơn đã hoàn tất.',
+      booking,
+      step,
+    });
   } catch (err) {
     const status = err.status || 500;
     res.status(status).json({ message: err.message || 'Check-out thất bại.' });

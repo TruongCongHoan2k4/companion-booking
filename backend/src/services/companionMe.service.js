@@ -103,10 +103,10 @@ export async function companionIncomeStats(userId) {
 export async function companionPatchBooking(companionDoc, bookingId, body) {
   const status = body?.status;
   if (status === 'ACCEPTED') {
-    return workflowBooking(companionDoc._id, bookingId, { action: 'ACCEPT' });
+    return workflowBooking(companionDoc._id, bookingId, 'ACCEPT');
   }
   if (status === 'REJECTED') {
-    return workflowBooking(companionDoc._id, bookingId, { action: 'REJECT' });
+    return workflowBooking(companionDoc._id, bookingId, 'REJECT');
   }
   const err = new Error('Chỉ hỗ trợ cập nhật trạng thái ACCEPTED hoặc REJECTED từ PENDING.');
   err.status = 400;

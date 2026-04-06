@@ -77,6 +77,13 @@ export async function setCompanionStatus(companionId, status, options = {}) {
     err.status = 404;
     throw err;
   }
+
+  // Khi admin duyệt hồ sơ → mới chính thức nâng role user lên COMPANION.
+  // Khi bị từ chối → giữ nguyên CUSTOMER để user có thể nộp lại.
+  if (status === 'APPROVED' && c.user?._id) {
+    await User.updateOne({ _id: c.user._id }, { $set: { role: 'COMPANION' } });
+  }
+
   const note = reason ? `\nLý do: ${reason}` : '';
   await notifyUser(
     c.user?._id,

@@ -209,11 +209,7 @@ export async function registerCompanionApplication(userId, body) {
     err.status = 404;
     throw err;
   }
-  if (user.role === 'COMPANION') {
-    const err = new Error('Tài khoản đã là companion.');
-    err.status = 400;
-    throw err;
-  }
+  // Chỉ cho phép user CUSTOMER nộp hồ sơ. Việc "trở thành companion" chỉ xảy ra sau khi admin duyệt.
   if (user.role !== 'CUSTOMER') {
     const err = new Error('Chỉ tài khoản khách hàng mới đăng ký companion tại đây.');
     err.status = 403;
@@ -239,9 +235,6 @@ export async function registerCompanionApplication(userId, body) {
       status: 'PENDING',
     });
   }
-
-  user.role = 'COMPANION';
-  await user.save();
 
   return { companionId: String(companion._id), status: companion.status };
 }

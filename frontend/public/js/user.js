@@ -49,6 +49,21 @@ function parseRentalVenuesLines(text) {
     .filter(Boolean);
 }
 
+/**
+ * Parse danh sách URL lưu dạng chuỗi (ngăn bởi dấu phẩy / xuống dòng).
+ * Hỗ trợ backend trả string, array, hoặc null.
+ */
+function parseCommaUrls(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value.map((s) => String(s || '').trim()).filter(Boolean);
+  }
+  return String(value)
+    .split(/[,\r\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 /** Một số phiên bản Spring có thể serialize Optional thành { present, value }. */
 function unwrapOptionalEntity(data) {
   if (
@@ -167,8 +182,24 @@ function renderTopNav(auth) {
     auth.authenticated && auth.role === 'COMPANION'
       ? `<a class="btn btn-outline-primary btn-sm ms-1 py-1" href="../companion/dashboard.html" title="Dashboard Companion"><i class="bi bi-grid-1x2"></i><span class="app-nav-text ms-1 d-none d-lg-inline">Companion</span></a>`
       : '';
+  const roleLabel =
+    auth.role === 'ADMIN' ? 'Admin' : auth.role === 'COMPANION' ? 'Companion' : auth.role === 'CUSTOMER' ? 'Khách' : '';
+  const displayName = auth.user?.fullName || auth.fullName || auth.username || '';
+  const balanceRaw = auth.user?.balance ?? auth.user?.walletBalance ?? auth.balance ?? null;
+  const balanceNum = balanceRaw != null ? Number(balanceRaw) : NaN;
+  const balanceLabel =
+    Number.isFinite(balanceNum) ? `${balanceNum.toLocaleString('vi-VN')} VND` : balanceRaw != null ? `${balanceRaw} VND` : '';
   const authPart = auth.authenticated
-    ? `<span class="navbar-text ms-1 small text-nowrap"><i class="bi bi-person-circle"></i> <strong>${escapeHtml(auth.username)}</strong></span>
+    ? `<span class="navbar-text ms-1 small text-nowrap">
+            <i class="bi bi-person-circle"></i>
+            <strong>${escapeHtml(displayName)}</strong>
+            ${roleLabel ? `<span class="badge text-bg-light border ms-1">${escapeHtml(roleLabel)}</span>` : ''}
+            ${
+              balanceLabel
+                ? `<span class="badge text-bg-success ms-1"><i class="bi bi-wallet2 me-1"></i>${escapeHtml(balanceLabel)}</span>`
+                : ''
+            }
+        </span>
            ${companionDashboardBtn}
            <button id="logout-btn" type="button" class="btn btn-outline-danger btn-sm ms-1 py-1" title="Đăng xuất"><i class="bi bi-box-arrow-right"></i><span class="app-nav-text ms-1 d-none d-md-inline">Thoát</span></button>`
     : `<a class="btn btn-outline-primary btn-sm ms-1 py-1" href="./login.html" title="Đăng nhập"><i class="bi bi-box-arrow-in-right"></i><span class="app-nav-text ms-1 d-none d-sm-inline">Đăng nhập</span></a>
@@ -427,7 +458,7 @@ async function initProfilePage(auth) {
               <div class="d-grid gap-2 mt-3">
                 <a class="btn btn-primary" href="./booking.html?id=${escapeHtml(companion.id)}"><i class="bi bi-calendar-plus me-1"></i>Đặt lịch</a>
                 <div class="d-flex gap-2">
-                  <a class="btn btn-outline-warning flex-grow-1" href="./report.html?reportedUserId=${escapeHtml(companion.user?.id || '')}"><i class="bi bi-flag me-1"></i>Tố cáo / SOS</a>
+                  <a id="profile-report-btn" class="btn btn-outline-warning flex-grow-1" href="./report.html"><i class="bi bi-flag me-1"></i>Tố cáo / SOS</a>
                   ${auth.authenticated ? `<button id="add-favorite-btn" class="btn btn-outline-danger"><i class="bi bi-heart me-1"></i>Yêu thích</button>` : ''}
                 </div>
               </div>
@@ -515,6 +546,19 @@ async function initProfilePage(auth) {
         } else {
           setMessage('profile-message', 'danger', 'Thêm yêu thích thất bại');
         }
+      });
+    }
+
+    // Nút "Tố cáo / SOS": bắt buộc có reportedUserId và giữ nguyên mọi query param hiện có.
+    const reportBtn = document.getElementById('profile-report-btn');
+    if (reportBtn) {
+      reportBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const url = new URL('./report.html', window.location.href);
+        const params = new URLSearchParams(window.location.search);
+        params.set('reportedUserId', String(companion.user?.id || ''));
+        url.search = params.toString();
+        window.location.href = url.toString();
       });
     }
   } catch (err) {
@@ -808,6 +852,60 @@ async function initAppointmentsPage(auth) {
   const box = document.getElementById('appointment-list');
   const res = await apiFetch('/api/bookings/me', { headers: {} });
   const bookings = await bookingsMeList(res);
+
+  // Realtime: join room theo các booking đang hiển thị để nhận event check-in/out từ đối phương.
+  // Khi có event → hiện toast + reload danh sách lịch hẹn.
+  if (window.RealtimeStomp && typeof RealtimeStomp.subscribeBookingStatus === 'function') {
+    try {
+      await RealtimeStomp.ensureLibs();
+      await RealtimeStomp.connect();
+      const active = bookings.filter((b) => ['ACCEPTED', 'IN_PROGRESS'].includes(b.status));
+      const seen = new Set();
+      active.slice(0, 12).forEach((b) => seen.add(String(b.id)));
+      if (!window.__userBookingSubs) window.__userBookingSubs = new Map();
+
+      // unsubscribe những cái không còn
+      for (const [bid, sub] of window.__userBookingSubs.entries()) {
+        if (!seen.has(bid)) {
+          try {
+            sub?.unsubscribe?.();
+          } catch (_) {}
+          window.__userBookingSubs.delete(bid);
+        }
+      }
+      // subscribe cái mới
+      for (const bid of seen) {
+        if (window.__userBookingSubs.has(bid)) continue;
+        const sub = await RealtimeStomp.subscribeBookingStatus(bid, async (evt) => {
+          const e = evt || {};
+          const isSelf =
+            (e.event === 'checkin_requested' && e.requestedBy === auth.role) ||
+            (e.event === 'checkout_requested' && e.requestedBy === auth.role);
+          const nameMap = {
+            checkin_requested: isSelf ? 'Bạn đã gửi yêu cầu check-in' : 'Đối phương yêu cầu check-in',
+            checkin_confirmed: 'Check-in đã được xác nhận',
+            checkout_requested: isSelf ? 'Bạn đã gửi yêu cầu check-out' : 'Đối phương yêu cầu check-out',
+            checkout_confirmed: 'Check-out đã được xác nhận',
+            extension_accepted: 'Yêu cầu gia hạn đã được chấp nhận',
+            extension_rejected: 'Yêu cầu gia hạn đã bị từ chối',
+          };
+          const title = nameMap[e.event] || 'Cập nhật booking';
+          showUserNotificationToast({
+            id: Date.now(),
+            title,
+            content: `Booking #${bid} • ${e.event || e.action || e.status || ''}`.trim(),
+            createdAt: new Date().toISOString(),
+          });
+          // reload list để nút/status cập nhật
+          await initAppointmentsPage(auth);
+        });
+        window.__userBookingSubs.set(bid, sub);
+      }
+    } catch (e) {
+      console.warn('Booking realtime không khả dụng', e);
+    }
+  }
+
   box.innerHTML = bookings.length
     ? bookings
         .map((b) => {
@@ -876,6 +974,17 @@ async function initAppointmentsPage(auth) {
         alert(msg);
         return;
       }
+      try {
+        const j = await res.json();
+        if (j?.message) {
+          showUserNotificationToast({
+            id: Date.now(),
+            title: 'Booking',
+            content: j.message,
+            createdAt: new Date().toISOString(),
+          });
+        }
+      } catch (_) {}
       await initAppointmentsPage(auth);
     });
   });
@@ -996,8 +1105,11 @@ async function initReportPage(auth) {
   if (!requireLogin(auth)) return;
   const params = new URLSearchParams(window.location.search);
   const reportedUserInput = document.getElementById('reportedUserId');
-  if (params.get('reportedUserId')) {
-    reportedUserInput.value = params.get('reportedUserId');
+  const fromReported = params.get('reportedUserId');
+  const fromLegacy = params.get('id');
+  const picked = fromReported != null && String(fromReported).trim() ? String(fromReported).trim() : String(fromLegacy || '').trim();
+  if (picked) {
+    reportedUserInput.value = picked;
   }
   async function buildEmergencyReasonFromBooking(bookingId) {
     if (!bookingId) return 'SOS khẩn cấp. Cần hỗ trợ ngay.';
@@ -1133,11 +1245,17 @@ async function initChatPage(auth) {
   const params = new URLSearchParams(window.location.search);
   const bookingIdText = document.getElementById('chat-booking-id-text');
   const threadTitle = document.getElementById('chat-thread-title');
-  const threadListBox = document.getElementById('chat-thread-list');
-  let currentBookingId = Number(params.get('bookingId') || 0);
+  const bookingSelect = document.getElementById('chat-booking-select');
+  let currentBookingId = String(params.get('bookingId') || '').trim();
   let threads = [];
   let chatStompSub = null;
   let chatPollTimer = null;
+  const allowedChatStatuses = new Set(['ACCEPTED', 'IN_PROGRESS']);
+  const myName = auth?.user?.fullName || auth?.username || auth?.user?.username || '';
+  const myNameEl = document.getElementById('chat-my-name');
+  if (myNameEl) {
+    myNameEl.textContent = myName ? `Bạn: ${myName}` : '';
+  }
 
   async function resubscribeChatSocket() {
     if (chatStompSub && typeof chatStompSub.unsubscribe === 'function') {
@@ -1158,49 +1276,73 @@ async function initChatPage(auth) {
   function normalizeThreads(list) {
     return (Array.isArray(list) ? list : [])
       .map((b) => {
+        // Ưu tiên họ tên đã đăng ký hồ sơ (fullName). Với user: đối phương thường là companion.
         const partner =
-          b.customer?.username || b.companion?.user?.username || b.companion?.user?.fullName || 'Đối phương';
+          b.companion?.user?.fullName ||
+          b.companion?.user?.username ||
+          b.customer?.fullName ||
+          b.customer?.username ||
+          'Đối phương';
         return {
-          bookingId: Number(b.id || 0),
+          bookingId: String(b.id || b._id || '').trim(),
           partnerName: partner,
           status: b.status || '-',
           bookingTime: b.bookingTime,
         };
       })
-      .filter((t) => t.bookingId > 0);
-  }
-
-  function renderThreadList() {
-    if (!threadListBox) return;
-    if (!threads.length) {
-      threadListBox.innerHTML = `<div class="p-3 text-muted">Chưa có cuộc trò chuyện nào.</div>`;
-      return;
-    }
-    threadListBox.innerHTML = threads
-      .map((t) => {
-        const active = t.bookingId === currentBookingId ? 'bg-light' : '';
-        return `<button type="button" class="list-group-item list-group-item-action border-0 border-bottom ${active} chat-thread-item" data-booking-id="${t.bookingId}">
-                <div class="fw-semibold">${escapeHtml(t.partnerName)}</div>
-                <div class="small text-muted">Booking #${t.bookingId} - ${escapeHtml(t.status)}</div>
-                <div class="small text-muted">${escapeHtml(formatDateTime(t.bookingTime))}</div>
-            </button>`;
-      })
-      .join('');
-    threadListBox.querySelectorAll('.chat-thread-item').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        currentBookingId = Number(btn.getAttribute('data-booking-id'));
-        updateThreadHeader();
-        renderThreadList();
-        await loadMessages();
-        await resubscribeChatSocket();
-      });
-    });
+      .filter((t) => Boolean(t.bookingId));
   }
 
   function updateThreadHeader() {
     bookingIdText.textContent = currentBookingId ? String(currentBookingId) : '-';
     const thread = threads.find((t) => t.bookingId === currentBookingId);
     threadTitle.textContent = thread ? thread.partnerName : 'Chưa chọn cuộc trò chuyện';
+  }
+
+  function renderBookingSelect() {
+    if (!bookingSelect) return;
+    const items = Array.isArray(threads) ? threads : [];
+    if (!items.length) {
+      bookingSelect.innerHTML = `<option value="">Không có cuộc chat</option>`;
+      bookingSelect.value = '';
+      bookingSelect.disabled = true;
+      return;
+    }
+    bookingSelect.disabled = false;
+    bookingSelect.innerHTML = items
+      .map((t) => {
+        const label = `${t.partnerName || 'Đối phương'} • ${t.status || '-'} • ${formatDateTime(t.bookingTime) || ''}`.trim();
+        return `<option value="${escapeHtml(t.bookingId)}">${escapeHtml(label)}</option>`;
+      })
+      .join('');
+    bookingSelect.value = items.some((t) => t.bookingId === currentBookingId) ? currentBookingId : items[0].bookingId;
+  }
+
+  async function switchBooking(nextId) {
+    const next = String(nextId || '').trim();
+    if (!next || next === currentBookingId) return;
+    currentBookingId = next;
+    updateThreadHeader();
+    renderBookingSelect();
+    syncChatComposerState();
+    await loadMessages();
+    await resubscribeChatSocket();
+  }
+
+  function syncChatComposerState() {
+    const input = document.getElementById('chat-content');
+    const form = document.getElementById('chat-form');
+    if (!input || !form) return;
+    const t = threads.find((x) => x.bookingId === currentBookingId);
+    const status = t?.status || '';
+    const enabled = Boolean(currentBookingId) && allowedChatStatuses.has(status);
+    input.disabled = !enabled;
+    form.querySelector('button[type="submit"]')?.toggleAttribute?.('disabled', !enabled);
+    input.placeholder = !currentBookingId
+      ? 'Chọn 1 cuộc trò chuyện để nhắn...'
+      : enabled
+        ? 'Nhập tin nhắn...'
+        : `Chat chỉ mở khi companion đã nhận đơn (ACCEPTED/IN_PROGRESS). Trạng thái hiện tại: ${status || '-'}`;
   }
 
   async function loadChatThreads() {
@@ -1217,16 +1359,44 @@ async function initChatPage(auth) {
     results.forEach((item) => {
       if (!uniq.has(item.bookingId)) uniq.set(item.bookingId, item);
     });
-    threads = [...uniq.values()].sort((a, b) => new Date(b.bookingTime || 0) - new Date(a.bookingTime || 0));
+    threads = [...uniq.values()]
+      .filter((t) => allowedChatStatuses.has(t.status))
+      .sort((a, b) => new Date(b.bookingTime || 0) - new Date(a.bookingTime || 0));
   }
 
   async function resolveBookingForChat() {
     if (currentBookingId) return currentBookingId;
 
     const pickPreferred = (list) => {
-      if (!Array.isArray(list) || !list.length) return 0;
-      const preferred = list.find((b) => ['IN_PROGRESS', 'ACCEPTED', 'COMPLETED'].includes(b.status));
-      return Number((preferred || list[0]).id || 0);
+      if (!Array.isArray(list) || !list.length) return '';
+      const normalized = list
+        .map((b) => ({
+          id: String(b.id || b._id || '').trim(),
+          status: b.status,
+          bookingTime: b.bookingTime,
+        }))
+        .filter((b) => Boolean(b.id) && allowedChatStatuses.has(b.status));
+
+      if (!normalized.length) return '';
+
+      const now = Date.now();
+      const parsed = normalized.map((b) => {
+        const ts = b.bookingTime ? new Date(b.bookingTime).getTime() : NaN;
+        return { ...b, _ts: Number.isFinite(ts) ? ts : null };
+      });
+
+      const running = parsed.find((b) => b.status === 'IN_PROGRESS');
+      if (running) return running.id;
+
+      const upcoming = parsed
+        .filter((b) => b.status === 'ACCEPTED' && b._ts != null && b._ts >= now)
+        .sort((a, b) => a._ts - b._ts)[0];
+      if (upcoming) return upcoming.id;
+
+      const recentPast = parsed
+        .filter((b) => b.status === 'ACCEPTED' && b._ts != null)
+        .sort((a, b) => b._ts - a._ts)[0];
+      return recentPast?.id || parsed[0].id;
     };
 
     const myBookingsRes = await apiFetch('/api/bookings/me', { headers: {} });
@@ -1242,7 +1412,7 @@ async function initChatPage(auth) {
       if (picked) return picked;
     }
 
-    return 0;
+    return '';
   }
 
   async function loadMessages() {
@@ -1255,10 +1425,22 @@ async function initChatPage(auth) {
     const list = res.ok ? await res.json() : [];
     box.innerHTML =
       list
-        .map(
-          (m) =>
-            `<div class="mb-2"><strong>${escapeHtml(m.sender?.username || 'user')}:</strong> ${escapeHtml(m.content)} <span class="text-muted small">(${escapeHtml(formatDateTime(m.createdAt))})</span></div>`
-        )
+        .map((m) => {
+          const senderId = String(m.sender?.id || m.senderId || '');
+          const isMe = senderId && String(senderId) === String(auth.userId);
+          const name = m.sender?.fullName || m.sender?.username || (isMe ? 'Bạn' : 'Đối phương');
+          const time = formatDateTime(m.createdAt);
+          const bubbleClass = isMe ? 'cb-bubble cb-me' : 'cb-bubble cb-them';
+          const rowClass = isMe ? 'd-flex justify-content-end' : 'd-flex justify-content-start';
+          return `
+            <div class="${rowClass} mb-2">
+              <div class="${bubbleClass}">
+                <div class="cb-bubble-text">${escapeHtml(m.content || '')}</div>
+                <div class="cb-bubble-meta">${escapeHtml(name)} • ${escapeHtml(time)}</div>
+              </div>
+            </div>
+          `;
+        })
         .join('') || `<div class="text-muted">Chưa có tin nhắn.</div>`;
     box.scrollTop = box.scrollHeight;
   }
@@ -1269,19 +1451,45 @@ async function initChatPage(auth) {
       setMessage('chat-message', 'warning', 'Không tìm thấy booking phù hợp để chat.');
       return;
     }
+    const t = threads.find((x) => x.bookingId === currentBookingId);
+    if (!allowedChatStatuses.has(t?.status)) {
+      setMessage(
+        'chat-message',
+        'warning',
+        `Chat chỉ mở khi đơn đã được companion nhận và sẽ đóng sau khi check-out. Trạng thái hiện tại: ${t?.status || '-'}`
+      );
+      syncChatComposerState();
+      return;
+    }
     const content = document.getElementById('chat-content').value.trim();
     if (!content) return;
-    const res = await apiFetch(`/api/chat/${currentBookingId}/messages`, {
-      method: 'POST',
-      body: JSON.stringify({ content }),
-    });
-    if (res.ok) {
-      document.getElementById('chat-content').value = '';
-      await loadMessages();
-    } else {
-      const text = await res.text();
-      setMessage('chat-message', 'danger', text || 'Gửi tin nhắn thất bại');
+    // Ưu tiên socket realtime; fallback HTTP nếu socket lỗi/không khả dụng.
+    let sentOk = false;
+    if (window.RealtimeStomp?.sendChatMessage) {
+      try {
+        const ack = await RealtimeStomp.sendChatMessage(currentBookingId, content);
+        sentOk = Boolean(ack?.ok);
+        if (!sentOk && ack?.message) {
+          console.warn('send_message ack:', ack);
+        }
+      } catch (err) {
+        console.warn('send_message failed, fallback HTTP', err);
+      }
     }
+    if (!sentOk) {
+      const res = await apiFetch(`/api/chat/${currentBookingId}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ content }),
+      });
+      sentOk = res.ok;
+      if (!sentOk) {
+        const text = await res.text();
+        setMessage('chat-message', 'danger', text || 'Gửi tin nhắn thất bại');
+        return;
+      }
+    }
+    document.getElementById('chat-content').value = '';
+    await loadMessages();
   });
   document.getElementById('call-btn')?.addEventListener('click', async () => {
     if (!currentBookingId) return;
@@ -1298,8 +1506,12 @@ async function initChatPage(auth) {
 
   await loadChatThreads();
   currentBookingId = await resolveBookingForChat();
+  if (!threads.some((t) => t.bookingId === currentBookingId)) {
+    currentBookingId = threads[0]?.bookingId || '';
+  }
   updateThreadHeader();
-  renderThreadList();
+  renderBookingSelect();
+  syncChatComposerState();
   if (!currentBookingId) {
     setMessage('chat-message', 'warning', 'Chưa có booking để hiển thị chat.');
   }
@@ -1318,6 +1530,10 @@ async function initChatPage(auth) {
   } else {
     chatPollTimer = setInterval(loadMessages, 3000);
   }
+
+  bookingSelect?.addEventListener('change', async () => {
+    await switchBooking(bookingSelect.value);
+  });
 }
 
 async function refreshNotifications() {
@@ -1368,12 +1584,12 @@ function processRealtimeUserNotifications(list) {
     (a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0)
   );
   if (!userRealtimeNotifState.initialized) {
-    sorted.forEach((n) => userRealtimeNotifState.seenIds.add(Number(n.id)));
+    sorted.forEach((n) => userRealtimeNotifState.seenIds.add(String(n.id)));
     userRealtimeNotifState.initialized = true;
     return;
   }
   sorted.forEach((n) => {
-    const id = Number(n.id);
+    const id = String(n.id);
     if (!userRealtimeNotifState.seenIds.has(id)) {
       userRealtimeNotifState.seenIds.add(id);
       showUserNotificationToast(n);
@@ -1586,7 +1802,7 @@ async function bootstrap() {
         await RealtimeStomp.ensureLibs();
         await RealtimeStomp.connect();
         await RealtimeStomp.subscribeNotifications(Number(auth.userId), (n) => {
-          const id = Number(n.id);
+          const id = String(n.id);
           if (!userRealtimeNotifState.seenIds.has(id)) {
             userRealtimeNotifState.seenIds.add(id);
             showUserNotificationToast(n);

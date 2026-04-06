@@ -6,9 +6,17 @@ export const requireCompanion = async (req, res, next) => {
       return res.status(403).json({ message: 'Chỉ tài khoản companion mới dùng được API này.' });
     }
 
-    let companion = await Companion.findOne({ user: req.auth.userId });
+    const companion = await Companion.findOne({ user: req.auth.userId });
     if (!companion) {
-      companion = await Companion.create({ user: req.auth.userId });
+      return res.status(403).json({ message: 'Không tìm thấy hồ sơ companion.' });
+    }
+    if (companion.status !== 'APPROVED') {
+      return res.status(403).json({
+        message:
+          companion.status === 'PENDING'
+            ? 'Hồ sơ companion đang chờ admin duyệt.'
+            : 'Hồ sơ companion chưa được duyệt.',
+      });
     }
 
     req.companion = companion;
