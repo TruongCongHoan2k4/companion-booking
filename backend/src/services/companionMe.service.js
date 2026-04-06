@@ -4,6 +4,8 @@ import Companion from '../models/companion.model.js';
 import User from '../models/user.model.js';
 import Consultation from '../models/consultation.model.js';
 import Withdrawal from '../models/withdrawal.model.js';
+import WalletTransaction from '../models/walletTransaction.model.js';
+import PlatformSettings from '../models/platformSettings.model.js';
 import { serializeBooking, workflowBooking, companionDecideExtension } from './booking.service.js';
 import { bigIntToDecimal128, decimal128ToBigInt } from '../utils/money.util.js';
 
@@ -11,6 +13,23 @@ function decToNumber(d) {
   if (d == null) return 0;
   const str = typeof d === 'object' && d.toString === 'function' ? d.toString() : String(d);
   return Math.round(Number(str) || 0);
+}
+
+function isTxnUnsupported(err) {
+  const msg = String(err?.message || '');
+  return (
+    msg.includes('Transaction numbers are only allowed on a replica set member or mongos') ||
+    msg.includes('replica set') ||
+    msg.includes('mongos')
+  );
+}
+
+async function getOrCreateSettings() {
+  let s = await PlatformSettings.findOne();
+  if (!s) {
+    s = await PlatformSettings.create({});
+  }
+  return s;
 }
 
 export async function listCompanionBookings(userId) {
@@ -249,6 +268,8 @@ export async function answerConsultation(companionDoc, consultationId, answer) {
 }
 
 export async function listWithdrawals(companionDoc) {
+  const settings = await getOrCreateSettings();
+  const rate = settings.commissionRate ?? 0.15;
   const rows = await Withdrawal.find({ companion: companionDoc._id }).sort({ createdAt: -1 }).limit(100).lean();
   return rows.map((w) => ({
     id: String(w._id),
@@ -256,14 +277,20 @@ export async function listWithdrawals(companionDoc) {
     amount: decToNumber(w.amount),
     bankName: w.bankName,
     status: w.status,
-    commissionAmount: null,
-    netAmount: null,
+    commissionAmount: Math.round(decToNumber(w.amount) * rate),
+    netAmount: Math.max(0, decToNumber(w.amount) - Math.round(decToNumber(w.amount) * rate)),
   }));
 }
 
 export async function createWithdrawal(companionDoc, body) {
-  const amount = Number(body?.amount);
-  if (!Number.isFinite(amount) || amount <= 0) {
+  const amountNum = Number(body?.amount);
+  if (!Number.isFinite(amountNum) || amountNum <= 0) {
+    const err = new Error('Số tiền rút không hợp lệ.');
+    err.status = 400;
+    throw err;
+  }
+  const amount = BigInt(Math.floor(amountNum));
+  if (amount <= 0n) {
     const err = new Error('Số tiền rút không hợp lệ.');
     err.status = 400;
     throw err;
@@ -273,15 +300,129 @@ export async function createWithdrawal(companionDoc, body) {
     err.status = 400;
     throw err;
   }
-  await Withdrawal.create({
-    companion: companionDoc._id,
-    amount: bigIntToDecimal128(BigInt(Math.floor(amount))),
-    bankName: companionDoc.payoutBankName,
-    bankAccountNumber: companionDoc.payoutBankAccountNumber,
-    accountHolderName: companionDoc.payoutAccountHolderName,
-    status: 'PENDING',
-  });
-  return true;
+
+  const companionUserId = companionDoc.user;
+  if (!companionUserId) {
+    const err = new Error('Không tìm thấy tài khoản user của companion.');
+    err.status = 500;
+    throw err;
+  }
+
+  async function createWithdrawalNoTxn() {
+    const pending = await Withdrawal.countDocuments({ companion: companionDoc._id, status: 'PENDING' });
+    if (pending > 0) {
+      const err = new Error('Bạn đang có lệnh rút tiền chờ duyệt. Vui lòng chờ admin xử lý.');
+      err.status = 400;
+      err.code = 'PENDING_WITHDRAWAL_EXISTS';
+      throw err;
+    }
+
+    const user = await User.findById(companionUserId);
+    if (!user) {
+      const err = new Error('Không tìm thấy người dùng.');
+      err.status = 404;
+      throw err;
+    }
+    const bal = decimal128ToBigInt(user.balance);
+    if (bal < amount) {
+      const err = new Error('Số dư ví không đủ để rút.');
+      err.status = 400;
+      err.code = 'INSUFFICIENT_BALANCE';
+      throw err;
+    }
+
+    user.balance = bigIntToDecimal128(bal - amount);
+    await user.save();
+
+    const w = await Withdrawal.create({
+      companion: companionDoc._id,
+      amount: bigIntToDecimal128(amount),
+      bankName: companionDoc.payoutBankName,
+      bankAccountNumber: companionDoc.payoutBankAccountNumber,
+      accountHolderName: companionDoc.payoutAccountHolderName,
+      status: 'PENDING',
+    });
+
+    await WalletTransaction.create({
+      user: companionUserId,
+      amount: bigIntToDecimal128(amount),
+      type: 'CHARGE',
+      provider: 'WITHDRAWAL',
+      description: `Tạo lệnh rút tiền #${String(w._id)}`,
+    });
+
+    return true;
+  }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const pending = await Withdrawal.countDocuments({ companion: companionDoc._id, status: 'PENDING' }).session(session);
+    if (pending > 0) {
+      const err = new Error('Bạn đang có lệnh rút tiền chờ duyệt. Vui lòng chờ admin xử lý.');
+      err.status = 400;
+      err.code = 'PENDING_WITHDRAWAL_EXISTS';
+      throw err;
+    }
+
+    const user = await User.findById(companionUserId).session(session);
+    if (!user) {
+      const err = new Error('Không tìm thấy người dùng.');
+      err.status = 404;
+      throw err;
+    }
+
+    const bal = decimal128ToBigInt(user.balance);
+    if (bal < amount) {
+      const err = new Error('Số dư ví không đủ để rút.');
+      err.status = 400;
+      err.code = 'INSUFFICIENT_BALANCE';
+      throw err;
+    }
+
+    user.balance = bigIntToDecimal128(bal - amount);
+    await user.save({ session });
+
+    const [w] = await Withdrawal.create(
+      [
+        {
+          companion: companionDoc._id,
+          amount: bigIntToDecimal128(amount),
+          bankName: companionDoc.payoutBankName,
+          bankAccountNumber: companionDoc.payoutBankAccountNumber,
+          accountHolderName: companionDoc.payoutAccountHolderName,
+          status: 'PENDING',
+        },
+      ],
+      { session }
+    );
+
+    await WalletTransaction.create(
+      [
+        {
+          user: companionUserId,
+          amount: bigIntToDecimal128(amount),
+          type: 'CHARGE',
+          provider: 'WITHDRAWAL',
+          description: `Tạo lệnh rút tiền #${String(w._id)}`,
+        },
+      ],
+      { session }
+    );
+
+    await session.commitTransaction();
+    return true;
+  } catch (err) {
+    try {
+      await session.abortTransaction();
+    } catch (_) {}
+    if (isTxnUnsupported(err)) {
+      return await createWithdrawalNoTxn();
+    }
+    throw err;
+  } finally {
+    session.endSession();
+  }
 }
 
 export function getBankAccount(companionDoc) {

@@ -249,9 +249,11 @@ function companionCard(companion) {
             </div>
             <div>
               <h5 class="card-title mb-0 fw-bold">${escapeHtml(name)}</h5>
-              <div class="d-flex align-items-center gap-2 mt-1">
+              <div class="d-flex flex-wrap align-items-center gap-2 mt-1">
+                <span class="badge ${onlineClass}" style="font-size:0.7rem;">
+                  <i class="bi bi-circle-fill me-1" style="font-size:0.4rem;"></i>${onlineText}
+                </span>
                 <span class="badge bg-warning text-dark" style="font-size:0.75rem;">${rating}</span>
-                <span class="badge ${onlineClass}" style="font-size:0.7rem;"><i class="bi bi-circle-fill me-1" style="font-size:0.4rem;"></i>${onlineText}</span>
               </div>
             </div>
           </div>
@@ -275,7 +277,16 @@ async function loadCompanions(targetId) {
   const box = document.getElementById(targetId);
   if (!box) return [];
   const res = await apiFetch('/api/companions');
-  const companions = res.ok ? await res.json() : [];
+  const companionsRaw = res.ok ? await res.json() : [];
+  // Ưu tiên hiển thị online trước, offline đưa xuống sau.
+  const companions = (Array.isArray(companionsRaw) ? companionsRaw : []).sort((a, b) => {
+    const ao = a?.onlineStatus ? 1 : 0;
+    const bo = b?.onlineStatus ? 1 : 0;
+    if (ao !== bo) return bo - ao; // online trước
+    const at = new Date(a?.updatedAt || a?.createdAt || 0).getTime();
+    const bt = new Date(b?.updatedAt || b?.createdAt || 0).getTime();
+    return bt - at;
+  });
   box.innerHTML = companions.length
     ? companions.map(companionCard).join('')
     : `<div class="empty-state">Chưa có companion nào.</div>`;

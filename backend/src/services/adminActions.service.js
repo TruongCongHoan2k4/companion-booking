@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Companion from '../models/companion.model.js';
 import User from '../models/user.model.js';
 import Notification from '../models/notification.model.js';
@@ -5,6 +6,8 @@ import Review from '../models/review.model.js';
 import Report from '../models/report.model.js';
 import Withdrawal from '../models/withdrawal.model.js';
 import PlatformSettings from '../models/platformSettings.model.js';
+import WalletTransaction from '../models/walletTransaction.model.js';
+import { bigIntToDecimal128, decimal128ToBigInt } from '../utils/money.util.js';
 
 function escapeRegex(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -28,6 +31,15 @@ function ensureReason(reason, minLen, message) {
     throw err;
   }
   return value;
+}
+
+function isTxnUnsupported(err) {
+  const msg = String(err?.message || '');
+  return (
+    msg.includes('Transaction numbers are only allowed on a replica set member or mongos') ||
+    msg.includes('replica set') ||
+    msg.includes('mongos')
+  );
 }
 
 async function notifyUser(userId, title, content) {
@@ -335,38 +347,181 @@ export async function setCommissionRate(rate) {
 
 export async function approveWithdrawal(id, options = {}) {
   const note = normalizeReason(options.reason);
-  const w = await Withdrawal.findByIdAndUpdate(id, { status: 'APPROVED' }, { new: true }).populate({
-    path: 'companion',
-    select: 'user',
-  });
-  if (!w) {
-    const err = new Error('Không tìm thấy lệnh rút.');
-    err.status = 404;
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const w = await Withdrawal.findById(id).session(session).populate({
+      path: 'companion',
+      select: 'user',
+    });
+    if (!w) {
+      const err = new Error('Không tìm thấy lệnh rút.');
+      err.status = 404;
+      throw err;
+    }
+    if (w.status !== 'PENDING') {
+      const err = new Error('Lệnh rút tiền không còn ở trạng thái chờ duyệt.');
+      err.status = 400;
+      throw err;
+    }
+    w.status = 'APPROVED';
+    await w.save({ session });
+
+    await session.commitTransaction();
+
+    await notifyUser(
+      w.companion?.user,
+      'Lệnh rút tiền đã được duyệt',
+      `Yêu cầu rút tiền của bạn đã được duyệt.${note ? `\nGhi chú: ${note}` : ''}`
+    );
+  } catch (err) {
+    try {
+      await session.abortTransaction();
+    } catch (_) {}
+    if (isTxnUnsupported(err)) {
+      const w = await Withdrawal.findById(id).populate({ path: 'companion', select: 'user' });
+      if (!w) {
+        const e = new Error('Không tìm thấy lệnh rút.');
+        e.status = 404;
+        throw e;
+      }
+      if (w.status !== 'PENDING') {
+        const e = new Error('Lệnh rút tiền không còn ở trạng thái chờ duyệt.');
+        e.status = 400;
+        throw e;
+      }
+      w.status = 'APPROVED';
+      await w.save();
+      await notifyUser(
+        w.companion?.user,
+        'Lệnh rút tiền đã được duyệt',
+        `Yêu cầu rút tiền của bạn đã được duyệt.${note ? `\nGhi chú: ${note}` : ''}`
+      );
+      return;
+    }
     throw err;
+  } finally {
+    session.endSession();
   }
-  await notifyUser(
-    w.companion?.user,
-    'Lệnh rút tiền đã được duyệt',
-    `Yêu cầu rút tiền của bạn đã được duyệt.${note ? `\nGhi chú: ${note}` : ''}`
-  );
 }
 
 export async function rejectWithdrawal(id, options = {}) {
   const reason = ensureReason(options.reason, 8, 'Vui lòng nhập lý do từ chối lệnh rút (ít nhất 8 ký tự).');
-  const w = await Withdrawal.findByIdAndUpdate(id, { status: 'REJECTED' }, { new: true }).populate({
-    path: 'companion',
-    select: 'user',
-  });
-  if (!w) {
-    const err = new Error('Không tìm thấy lệnh rút.');
-    err.status = 404;
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const w = await Withdrawal.findById(id).session(session).populate({
+      path: 'companion',
+      select: 'user',
+    });
+    if (!w) {
+      const err = new Error('Không tìm thấy lệnh rút.');
+      err.status = 404;
+      throw err;
+    }
+    if (w.status !== 'PENDING') {
+      const err = new Error('Lệnh rút tiền không còn ở trạng thái chờ duyệt.');
+      err.status = 400;
+      throw err;
+    }
+
+    const companionUserId = w.companion?.user;
+    if (!companionUserId) {
+      const err = new Error('Không tìm thấy user của companion để hoàn tiền.');
+      err.status = 500;
+      throw err;
+    }
+
+    const refund = decimal128ToBigInt(w.amount);
+    if (refund > 0n) {
+      const user = await User.findById(companionUserId).session(session);
+      if (!user) {
+        const err = new Error('Không tìm thấy người dùng để hoàn tiền.');
+        err.status = 500;
+        throw err;
+      }
+      const bal = decimal128ToBigInt(user.balance);
+      user.balance = bigIntToDecimal128(bal + refund);
+      await user.save({ session });
+
+      await WalletTransaction.create(
+        [
+          {
+            user: companionUserId,
+            amount: bigIntToDecimal128(refund),
+            type: 'REFUND',
+            provider: 'WITHDRAWAL',
+            description: `Hoàn tiền lệnh rút bị từ chối #${String(w._id)}`,
+          },
+        ],
+        { session }
+      );
+    }
+
+    w.status = 'REJECTED';
+    await w.save({ session });
+
+    await session.commitTransaction();
+
+    await notifyUser(
+      w.companion?.user,
+      'Lệnh rút tiền bị từ chối',
+      `Yêu cầu rút tiền của bạn đã bị từ chối.\nLý do: ${reason}`
+    );
+  } catch (err) {
+    try {
+      await session.abortTransaction();
+    } catch (_) {}
+    if (isTxnUnsupported(err)) {
+      const w = await Withdrawal.findById(id).populate({ path: 'companion', select: 'user' });
+      if (!w) {
+        const e = new Error('Không tìm thấy lệnh rút.');
+        e.status = 404;
+        throw e;
+      }
+      if (w.status !== 'PENDING') {
+        const e = new Error('Lệnh rút tiền không còn ở trạng thái chờ duyệt.');
+        e.status = 400;
+        throw e;
+      }
+      const companionUserId = w.companion?.user;
+      if (!companionUserId) {
+        const e = new Error('Không tìm thấy user của companion để hoàn tiền.');
+        e.status = 500;
+        throw e;
+      }
+      const refund = decimal128ToBigInt(w.amount);
+      if (refund > 0n) {
+        const user = await User.findById(companionUserId);
+        if (!user) {
+          const e = new Error('Không tìm thấy người dùng để hoàn tiền.');
+          e.status = 500;
+          throw e;
+        }
+        const bal = decimal128ToBigInt(user.balance);
+        user.balance = bigIntToDecimal128(bal + refund);
+        await user.save();
+        await WalletTransaction.create({
+          user: companionUserId,
+          amount: bigIntToDecimal128(refund),
+          type: 'REFUND',
+          provider: 'WITHDRAWAL',
+          description: `Hoàn tiền lệnh rút bị từ chối #${String(w._id)}`,
+        });
+      }
+      w.status = 'REJECTED';
+      await w.save();
+      await notifyUser(
+        w.companion?.user,
+        'Lệnh rút tiền bị từ chối',
+        `Yêu cầu rút tiền của bạn đã bị từ chối.\nLý do: ${reason}`
+      );
+      return;
+    }
     throw err;
+  } finally {
+    session.endSession();
   }
-  await notifyUser(
-    w.companion?.user,
-    'Lệnh rút tiền bị từ chối',
-    `Yêu cầu rút tiền của bạn đã bị từ chối.\nLý do: ${reason}`
-  );
 }
 
 export async function listDisputes() {
