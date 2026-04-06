@@ -35,10 +35,24 @@ function escapeHtml(value) {
 
 function showAlert(message, type = 'success') {
   const box = document.getElementById('alert-box');
-  box.innerHTML = `<div class="alert alert-${type} alert-dismissible fade show" role="alert">
-        ${escapeHtml(message)}
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-    </div>`;
+  if (!box) return;
+
+  const toastEl = document.createElement('div');
+  toastEl.className = `toast text-bg-${type}`;
+  toastEl.setAttribute('role', 'alert');
+  toastEl.setAttribute('aria-live', 'assertive');
+  toastEl.setAttribute('aria-atomic', 'true');
+  toastEl.innerHTML = `
+    <div class="d-flex">
+      <div class="toast-body">${escapeHtml(message)}</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+    </div>
+  `;
+  box.appendChild(toastEl);
+
+  const toast = new bootstrap.Toast(toastEl, { delay: 3000, autohide: true });
+  toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove(), { once: true });
+  toast.show();
 }
 
 function statusBadgeClass(status) {
