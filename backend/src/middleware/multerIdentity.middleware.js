@@ -3,13 +3,15 @@ import multer from 'multer';
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 120 * 1024 * 1024;
 
-const IMAGE_MIME = /^image\/(jpeg|jpg|png|webp)$/i;
+// iPhone đôi khi upload HEIC/HEIF; cho phép ở dev để khỏi chặn ngay từ client.
+// Nếu dùng Cloudinary, Cloudinary vẫn có thể xử lý nhiều định dạng ảnh phổ biến.
+const IMAGE_MIME = /^image\/(jpeg|jpg|png|webp|heic|heif)$/i;
 const VIDEO_MIME = /^video\/(mp4|webm|quicktime)$/i;
 
 function fileFilter(req, file, cb) {
   if (file.fieldname === 'identityImage' || file.fieldname === 'avatar') {
     if (!IMAGE_MIME.test(file.mimetype)) {
-      return cb(new Error('Ảnh CCCD/đại diện chỉ chấp nhận JPEG, PNG hoặc WebP.'));
+      return cb(new Error('Ảnh CCCD/đại diện chỉ chấp nhận JPEG, PNG, WebP (hoặc HEIC/HEIF).'));
     }
     return cb(null, true);
   }

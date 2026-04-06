@@ -4,7 +4,7 @@ import Companion from '../models/companion.model.js';
 import User from '../models/user.model.js';
 import Consultation from '../models/consultation.model.js';
 import Withdrawal from '../models/withdrawal.model.js';
-import { serializeBooking, workflowBooking } from './booking.service.js';
+import { serializeBooking, workflowBooking, companionDecideExtension } from './booking.service.js';
 import { bigIntToDecimal128, decimal128ToBigInt } from '../utils/money.util.js';
 
 function decToNumber(d) {
@@ -129,6 +129,11 @@ export async function companionSos(companionDoc, bookingId, note) {
   booking.sosNote = note ? String(note).trim().slice(0, 2000) : '';
   await booking.save();
   return serializeBooking(booking);
+}
+
+export async function decideBookingExtension(companionUserId, bookingId, decision) {
+  const action = decision === 'ACCEPT' ? 'ACCEPT' : 'REJECT';
+  return companionDecideExtension(companionUserId, bookingId, action);
 }
 
 export function toCompanionProfileJson(doc) {

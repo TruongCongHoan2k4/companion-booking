@@ -6,31 +6,13 @@ import Booking from '../src/models/booking.model.js';
 import Category from '../src/models/category.model.js';
 import ServicePrice from '../src/models/servicePrice.model.js';
 import WalletTransaction from '../src/models/walletTransaction.model.js';
-import Transaction from '../src/models/transaction.model.js';
 import Review from '../src/models/review.model.js';
-import PlatformSettings from '../src/models/platformSettings.model.js';
-import Favorite from '../src/models/favorite.model.js';
-import Consultation from '../src/models/consultation.model.js';
-import Notification from '../src/models/notification.model.js';
 import Report from '../src/models/report.model.js';
 import Withdrawal from '../src/models/withdrawal.model.js';
-import ChatMessage from '../src/models/chatMessage.model.js';
-import PasswordResetOtp from '../src/models/passwordResetOtp.model.js';
-import CompanionAvailability from '../src/models/companionAvailability.model.js';
-
-import { createBooking, workflowBooking, checkInBooking, checkOutBooking } from '../src/services/booking.service.js';
-import { withDb, mulberry32, pick, int, slugifyAscii, hashPassword, vnd, nowPlusHours } from './seed/utils.js';
+import PlatformSettings from '../src/models/platformSettings.model.js';
+import { withDb, mulberry32, pick, int, slugifyAscii, hashPassword, vnd } from './seed/utils.js';
 
 const DEFAULT_PASSWORD = process.env.SEED_PASSWORD || '123456';
-
-function backdateWithinLastMonths(rand, maxMonthsBack = 11) {
-  const now = new Date();
-  const monthsBack = int(rand, 0, Math.max(0, Math.floor(maxMonthsBack)));
-  const d = new Date(now.getFullYear(), now.getMonth() - monthsBack, 1);
-  d.setDate(int(rand, 1, 28));
-  d.setHours(int(rand, 0, 23), int(rand, 0, 59), int(rand, 0, 59), 0);
-  return d;
-}
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -62,25 +44,7 @@ async function hardReset() {
     // ignore
   }
 
-  const models = [
-    ChatMessage,
-    Notification,
-    Report,
-    Review,
-    Transaction,
-    WalletTransaction,
-    Withdrawal,
-    Consultation,
-    Favorite,
-    Booking,
-    ServicePrice,
-    CompanionAvailability,
-    Companion,
-    PasswordResetOtp,
-    User,
-    Category,
-    PlatformSettings,
-  ];
+  const models = [Withdrawal, Report, Review, WalletTransaction, Booking, ServicePrice, Companion, User, Category, PlatformSettings];
 
   for (const m of models) {
     try {
@@ -93,6 +57,17 @@ async function hardReset() {
 
 async function ensurePlatformSettings() {
   await PlatformSettings.updateOne({}, { $setOnInsert: { commissionRate: 0.15 } }, { upsert: true });
+}
+
+function monthStart(d) {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+function dateInMonth(rand, baseDate) {
+  const d = new Date(baseDate);
+  d.setDate(int(rand, 1, 28));
+  d.setHours(int(rand, 0, 23), int(rand, 0, 59), int(rand, 0, 59), 0);
+  return d;
 }
 
 async function upsertUser({ username, email, role, fullName, phoneNumber, balanceVnd }) {
@@ -157,7 +132,7 @@ async function seedBaseAccounts() {
     role: 'CUSTOMER',
     fullName: 'Nguyễn Minh Anh',
     phoneNumber: '0900000001',
-    balanceVnd: 5000000,
+    balanceVnd: 0,
   });
 
   const companionUser = await upsertUser({
@@ -191,17 +166,6 @@ async function seedBaseAccounts() {
     },
     { upsert: true, returnDocument: 'after' }
   );
-
-  const hasDeposit = await WalletTransaction.exists({ user: customer._id, type: 'DEPOSIT' });
-  if (!hasDeposit) {
-    await WalletTransaction.create({
-      user: customer._id,
-      amount: vnd(5000000),
-      type: 'DEPOSIT',
-      provider: 'SEED',
-      description: 'Seed: nạp ví ban đầu',
-    });
-  }
 
   return { admin, customer, companionUser, companion };
 }
@@ -261,7 +225,7 @@ async function seedUsersAndCompanions(rand, companionCount, customerCount) {
     const fullName = `${pick(rand, familyNames)} ${pick(rand, givenNames)}`;
     const username = `cus_${slugifyAscii(fullName)}_${i + 1}`;
     const email = `${username}@seed.local`;
-    const balance = int(rand, 1500000, 8000000);
+    const balance = 0;
     const user = await upsertUser({
       username,
       email,
@@ -270,17 +234,6 @@ async function seedUsersAndCompanions(rand, companionCount, customerCount) {
       phoneNumber: `08${String(20000000 + i).slice(0, 8)}`,
       balanceVnd: balance,
     });
-
-    const hasDeposit = await WalletTransaction.exists({ user: user._id, type: 'DEPOSIT' });
-    if (!hasDeposit) {
-      await WalletTransaction.create({
-        user: user._id,
-        amount: vnd(balance),
-        type: 'DEPOSIT',
-        provider: 'SEED',
-        description: 'Seed: nạp ví ban đầu',
-      });
-    }
     customers.push({ user, balance });
   }
 
@@ -313,236 +266,110 @@ async function seedServicePrices(rand, companions) {
   }
 }
 
-async function seedBookings(rand, companions, customers, bookingCount) {
-  const approved = companions.filter((c) => c.companion.status === 'APPROVED');
-  if (approved.length === 0) return;
+async function seedDashboardEvents(rand, { companions, customers }) {
+  const approved = companions.filter((c) => c.companion?.status === 'APPROVED');
+  if (!approved.length || !customers.length) return;
 
-  const venues = ['Quận 1', 'Quận 3', 'Thủ Đức', 'Cầu Giấy', 'Hai Bà Trưng', 'Hải Châu'];
-  const rentalVenues = ['Quán cafe', 'TTTM', 'Rạp phim', 'Công viên'];
-  const notes = ['Đi đúng giờ giúp mình nhé', 'Mình hơi ngại, nói chuyện nhẹ nhàng', 'Ưu tiên chỗ đông người', 'Có thể đổi địa điểm nếu cần'];
+  const now = new Date();
+  const months = [];
+  for (let i = 11; i >= 0; i--) {
+    months.push(monthStart(new Date(now.getFullYear(), now.getMonth() - i, 1)));
+  }
 
-  for (let i = 0; i < bookingCount; i++) {
-    const c = pick(rand, approved);
-    const u = pick(rand, customers);
+  // 1) Rải booking + CHARGE theo tháng để adminStats có revenue + totalTransactions tăng.
+  // Không phụ thuộc replica set: tạo trực tiếp Booking + WalletTransaction.
+  for (const m of months) {
+    const nBookings = int(rand, 1, 4);
+    for (let i = 0; i < nBookings; i++) {
+      const c = pick(rand, approved);
+      const u = pick(rand, customers);
+      const duration = pick(rand, [60, 90, 120, 180]);
+      const price = Number(c.pricePerHour || 200000);
+      const hold = Math.max(10000, Math.ceil((duration * price) / 60));
+      const createdAt = dateInMonth(rand, m);
 
-    const duration = pick(rand, [60, 90, 120, 180]);
-    const price = c.pricePerHour;
-    const hold = Math.ceil((duration * price) / 60);
-    if (u.balance < hold + 200000) {
-      const topup = hold + 1000000;
-      await User.updateOne({ _id: u.user._id }, { $set: { balance: vnd(topup) } });
-      await WalletTransaction.create({
-        user: u.user._id,
-        amount: vnd(topup),
-        type: 'DEPOSIT',
-        provider: 'SEED',
-        description: 'Seed: tự nạp thêm để đủ đặt lịch',
+      const booking = await Booking.create({
+        customer: u.user._id,
+        companion: c.companion._id,
+        bookingTime: createdAt,
+        duration,
+        location: pick(rand, ['Quận 1', 'Quận 3', 'Cầu Giấy', 'Hải Châu']),
+        rentalVenue: pick(rand, ['Quán cafe', 'TTTM', 'Rạp phim']),
+        serviceName: pick(rand, ['Chơi game', 'Tâm sự', 'Đi chơi', 'Cafe']),
+        servicePricePerHour: vnd(price),
+        holdAmount: vnd(hold),
+        status: pick(rand, ['COMPLETED', 'COMPLETED', 'REJECTED', 'CANCELLED']),
+        acceptedAt: createdAt,
+        startedAt: createdAt,
+        completedAt: createdAt,
+        createdAt,
       });
-      u.balance = topup;
-    }
 
-    const bookingTime = nowPlusHours(rand, 2, 72);
-    const payload = {
-      companionId: c.companion._id.toString(),
-      bookingTime,
-      duration,
-      location: pick(rand, venues),
-      rentalVenue: pick(rand, rentalVenues),
-      serviceName: pick(rand, ['Chơi game', 'Tâm sự', 'Đi chơi', 'Cafe']),
-      servicePricePerHour: price,
-      note: rand() > 0.5 ? pick(rand, notes) : undefined,
-    };
+      // Tính "lợi nhuận nền tảng" dùng WalletTransaction type CHARGE
+      if (booking.status === 'COMPLETED') {
+        await WalletTransaction.create({
+          user: u.user._id,
+          booking: booking._id,
+          amount: vnd(int(rand, 30000, 250000)),
+          type: 'CHARGE',
+          provider: 'SYSTEM',
+          description: 'Phí nền tảng',
+          createdAt,
+        });
+      }
 
-    let created;
-    try {
-      created = await createBooking(u.user._id.toString(), payload);
-    } catch (e) {
-      // Fallback cho MongoDB không bật replica set (transaction sẽ fail).
-      // Tạo booking trực tiếp để UI/admin có dữ liệu để hiển thị.
-      try {
-        const holdAmount = vnd(hold);
-        const createdAt = backdateWithinLastMonths(rand, 11);
-        const [doc] = await Booking.create([
+      // 2) Review mới theo tháng (gắn booking COMPLETED)
+      if (booking.status === 'COMPLETED' && rand() > 0.35) {
+        await Review.updateOne(
+          { booking: booking._id },
           {
-            customer: u.user._id,
-            companion: c.companion._id,
-            bookingTime: new Date(bookingTime),
-            duration,
-            location: payload.location || undefined,
-            rentalVenue: payload.rentalVenue || undefined,
-            serviceName: payload.serviceName || undefined,
-            servicePricePerHour: vnd(price),
-            note: payload.note || undefined,
-            holdAmount,
-            status: 'PENDING',
-            createdAt,
+            $setOnInsert: {
+              booking: booking._id,
+              rating: pick(rand, [3, 4, 5]),
+              comment: pick(rand, ['Ổn áp', 'Rất vui', 'Dễ thương', 'Đúng giờ, nói chuyện tốt']),
+              hidden: false,
+              createdAt,
+            },
           },
-        ]);
-        created = { ...doc.toObject(), _id: doc._id.toString() };
-      } catch (_fallbackErr) {
-        continue;
+          { upsert: true }
+        );
       }
-    }
 
-    const actionRoll = rand();
-    if (actionRoll < 0.15) {
-      try {
-        await workflowBooking(c.companion._id.toString(), created._id, 'REJECT');
-      } catch (_) {
-        await Booking.updateOne({ _id: created._id }, { $set: { status: 'REJECTED' } });
-      }
-    } else {
-      try {
-        await workflowBooking(c.companion._id.toString(), created._id, 'ACCEPT');
-      } catch (_) {
-        await Booking.updateOne({ _id: created._id }, { $set: { status: 'ACCEPTED', acceptedAt: new Date() } });
-      }
-      if (actionRoll > 0.55) {
-        try {
-          await checkInBooking(u.user._id.toString(), 'CUSTOMER', created._id);
-        } catch (_) {
-          await Booking.updateOne({ _id: created._id }, { $set: { status: 'IN_PROGRESS', startedAt: new Date() } });
-        }
-        if (actionRoll > 0.8) {
-          try {
-            await checkOutBooking(u.user._id.toString(), 'CUSTOMER', created._id);
-          } catch (_) {
-            await Booking.updateOne(
-              { _id: created._id },
-              { $set: { status: 'COMPLETED', completedAt: new Date() } }
-            );
-          }
-
-          if (rand() > 0.5) {
-            const rating = pick(rand, [3, 4, 5]);
-            await Review.updateOne(
-              { booking: new mongoose.Types.ObjectId(created._id) },
-              {
-                $setOnInsert: {
-                  booking: new mongoose.Types.ObjectId(created._id),
-                  rating,
-                  comment: pick(rand, ['Rất vui!', 'Ổn áp', 'Nói chuyện dễ chịu', 'Sẽ đặt lại']),
-                  hidden: false,
-                },
-              },
-              { upsert: true }
-            );
-          }
+      // 3) Tranh chấp/report theo tháng
+      if (rand() > 0.85) {
+        const reporter = u.user;
+        const reported = c.user;
+        if (String(reporter._id) !== String(reported._id)) {
+          await Report.create({
+            reporter: reporter._id,
+            reportedUser: reported._id,
+            reason: pick(rand, ['Không đúng giờ', 'Thái độ không phù hợp', 'Hủy sát giờ', 'Khác']),
+            category: pick(rand, ['Thanh toán', 'Thái độ', 'Hành vi', 'Khác']),
+            emergency: rand() > 0.9,
+            relatedBookingId: booking._id,
+            status: rand() > 0.6 ? 'RESOLVED' : 'PENDING',
+            resolutionAction: rand() > 0.6 ? pick(rand, ['REFUND', 'PAYOUT', 'CLOSE']) : undefined,
+            resolutionNote: rand() > 0.6 ? 'Biên bản xử lý theo quy trình.' : undefined,
+            lastActionAt: createdAt,
+            createdAt,
+          });
         }
       }
     }
-  }
-}
 
-async function seedAdminEvents(rand, { companions, customers }) {
-  const approvedCompanions = companions.filter((c) => c.companion.status === 'APPROVED');
-  if (!approvedCompanions.length || !customers.length) return;
-
-  // 1) Profit widget trên dashboard đọc WalletTransaction type=CHARGE
-  // Hiện service checkout chưa tạo CHARGE, nên seed tạo một số CHARGE "giả lập phí nền tảng" để dashboard có dữ liệu.
-  const completedBookings = await Booking.find({ status: 'COMPLETED' }).sort({ createdAt: -1 }).limit(40).lean();
-  if (completedBookings.length) {
-    for (const b of completedBookings.slice(0, 18)) {
-      const exists = await WalletTransaction.exists({ booking: b._id, type: 'CHARGE' });
-      if (exists) continue;
-      const createdAt = backdateWithinLastMonths(rand, 11);
-      await WalletTransaction.create({
-        user: b.customer,
-        booking: b._id,
-        amount: b.holdAmount || vnd(0),
-        type: 'CHARGE',
-        provider: 'SEED',
-        description: 'Seed: tính phí nền tảng cho booking hoàn tất',
+    // 4) Lệnh rút tiền theo tháng
+    if (rand() > 0.4) {
+      const c = pick(rand, approved);
+      const createdAt = dateInMonth(rand, m);
+      await Withdrawal.create({
+        companion: c.companion._id,
+        amount: vnd(int(rand, 150000, 3000000)),
+        bankName: pick(rand, ['Vietcombank', 'Techcombank', 'MB Bank', 'ACB']),
+        bankAccountNumber: String(1000000000 + int(rand, 0, 899999999)).slice(0, 10),
+        accountHolderName: c.user?.fullName || c.user?.username || 'Companion',
+        status: pick(rand, ['PENDING', 'APPROVED', 'REJECTED', 'PAID']),
         createdAt,
       });
-      await Transaction.updateOne(
-        { booking: b._id },
-        { $setOnInsert: { booking: b._id, amount: b.holdAmount || vnd(0), status: 'COMPLETED', createdAt } },
-        { upsert: true }
-      );
-    }
-  } else {
-    // Nếu không có booking (ví dụ DB không hỗ trợ transaction và seed booking bị skip),
-    // vẫn tạo CHARGE rải theo tháng để dashboard có số liệu.
-    const customerUsers = customers.map((x) => x.user).filter(Boolean);
-    const chargeCount = int(rand, 8, 18);
-    for (let i = 0; i < chargeCount; i++) {
-      const u = pick(rand, customerUsers);
-      const createdAt = backdateWithinLastMonths(rand, 11);
-      await WalletTransaction.create({
-        user: u._id,
-        amount: vnd(int(rand, 30000, 180000)),
-        type: 'CHARGE',
-        provider: 'SEED',
-        description: 'Seed: phí nền tảng',
-        createdAt,
-      });
-    }
-  }
-
-  // 2) Withdrawal chart + pending list
-  const withdrawalCount = Math.min(10, approvedCompanions.length);
-  for (let i = 0; i < withdrawalCount; i++) {
-    const c = approvedCompanions[i];
-    const createdAt = backdateWithinLastMonths(rand, 11);
-    const amount = vnd(int(rand, 200000, 2500000));
-    await Withdrawal.create({
-      companion: c.companion._id,
-      amount,
-      bankName: pick(rand, ['Vietcombank', 'Techcombank', 'MB Bank', 'ACB']),
-      bankAccountNumber: String(1000000000 + int(rand, 0, 899999999)).slice(0, 10),
-      accountHolderName: c.user.fullName || c.user.username,
-      status: rand() > 0.65 ? 'APPROVED' : 'PENDING',
-      createdAt,
-    });
-  }
-
-  // 3) Disputes chart (Report)
-  const reportCount = int(rand, 4, 12);
-  for (let i = 0; i < reportCount; i++) {
-    const reporter = pick(rand, customers).user;
-    const reported = pick(rand, approvedCompanions).user;
-    if (!reporter?._id || !reported?._id) continue;
-    if (String(reporter._id) === String(reported._id)) continue;
-    const createdAt = backdateWithinLastMonths(rand, 11);
-    await Report.create({
-      reporter: reporter._id,
-      reportedUser: reported._id,
-      reason: pick(rand, [
-        'Không đúng giờ hẹn',
-        'Thái độ không phù hợp',
-        'Yêu cầu ngoài phạm vi dịch vụ',
-        'Hủy kèo sát giờ',
-      ]),
-      category: pick(rand, ['Hành vi', 'Thái độ', 'Thanh toán', 'Khác']),
-      emergency: rand() > 0.85,
-      status: rand() > 0.55 ? 'RESOLVED' : 'PENDING',
-      resolutionAction: rand() > 0.55 ? pick(rand, ['REFUND', 'PAYOUT', 'CLOSE']) : undefined,
-      resolutionNote: rand() > 0.55 ? 'Seed: xử lý tranh chấp theo quy trình.' : undefined,
-      lastActionAt: createdAt,
-      createdAt,
-    });
-  }
-
-  // 4) Reviews chart: đảm bảo có review rải đều (trang admin đọc Review.createdAt)
-  const existingReviews = await Review.countDocuments();
-  if (existingReviews < 12) {
-    const bookings = await Booking.find({ status: 'COMPLETED' }).sort({ createdAt: -1 }).limit(30).lean();
-    for (const b of bookings.slice(0, 12 - existingReviews)) {
-      const createdAt = backdateWithinLastMonths(rand, 11);
-      await Review.updateOne(
-        { booking: new mongoose.Types.ObjectId(b._id) },
-        {
-          $setOnInsert: {
-            booking: new mongoose.Types.ObjectId(b._id),
-            rating: pick(rand, [3, 4, 5]),
-            comment: pick(rand, ['Rất ổn.', 'Vui vẻ, đúng giờ.', 'Nói chuyện dễ chịu.', 'Sẽ đặt lại.']),
-            hidden: false,
-            createdAt,
-          },
-        },
-        { upsert: true }
-      );
     }
   }
 }
@@ -574,11 +401,10 @@ async function run() {
       customerCount
     );
     await seedServicePrices(rand, companionRows);
-    await seedBookings(rand, companionRows, customerRows, bookingCount);
-    await seedAdminEvents(rand, { companions: companionRows, customers: customerRows });
+    await seedDashboardEvents(rand, { companions: companionRows, customers: customerRows });
 
-    console.log('Seed OK (realistic).');
-    console.log(`Tạo thêm ${companionRows.length} companion, ${customerRows.length} customer, bookings ~${bookingCount}.`);
+    console.log('Seed OK.');
+    console.log(`Tạo ${companionRows.length} companion, ${customerRows.length} customer.`);
   }
 
   console.log('Tài khoản seed (password mặc định):', DEFAULT_PASSWORD);

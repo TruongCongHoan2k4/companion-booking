@@ -28,16 +28,18 @@ export async function getWalletMe(userId) {
     ...t,
     amount: t.amount != null && t.amount.toString ? t.amount.toString() : String(t.amount),
   }));
-  return { walletBalance: bal, transactions: items };
+  // Backward-compatible: một số UI cũ đọc field `balance`
+  return { walletBalance: bal, balance: bal, transactions: items };
 }
 
-export async function depositMock(userId, amount) {
+export async function deposit(userId, amount, provider) {
   const amt = BigInt(Math.floor(Number(amount)));
   if (amt <= 0n) {
     const err = new Error('Số tiền không hợp lệ.');
     err.status = 400;
     throw err;
   }
+  const prov = provider == null ? '' : String(provider).trim();
 
   async function depositNoTxn() {
     const user = await User.findById(userId);
@@ -46,7 +48,6 @@ export async function depositMock(userId, amount) {
       err.status = 404;
       throw err;
     }
-
     const bal = decimal128ToBigInt(user.balance);
     const newBal = bal + amt;
     user.balance = bigIntToDecimal128(newBal);
@@ -56,8 +57,8 @@ export async function depositMock(userId, amount) {
       user: userId,
       amount: bigIntToDecimal128(amt),
       type: 'DEPOSIT',
-      provider: 'MOCK',
-      description: 'Nạp tiền (mock, cộng trực tiếp số dư)',
+      provider: prov || undefined,
+      description: 'Nạp tiền vào ví',
     });
 
     return { walletBalance: newBal.toString() };
@@ -84,8 +85,8 @@ export async function depositMock(userId, amount) {
           user: userId,
           amount: bigIntToDecimal128(amt),
           type: 'DEPOSIT',
-          provider: 'MOCK',
-          description: 'Nạp tiền (mock, cộng trực tiếp số dư)',
+          provider: prov || undefined,
+          description: 'Nạp tiền vào ví',
         },
       ],
       { session }

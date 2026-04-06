@@ -72,3 +72,33 @@ export const checkOut = async (req, res) => {
     res.status(status).json({ message: err.message || 'Check-out thất bại.' });
   }
 };
+
+export const cancel = async (req, res) => {
+  try {
+    const booking = await bookingService.cancelBooking(req.auth.userId, req.auth.role, req.params.id);
+    res.json({ message: 'Đã hủy đơn.', booking });
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({ message: err.message || 'Hủy đơn thất bại.' });
+  }
+};
+
+export const extensionRequest = async (req, res) => {
+  try {
+    const booking = await bookingService.requestBookingExtension(req.auth.userId, req.params.id, req.body?.extraMinutes);
+    res.json({ message: 'Đã gửi yêu cầu gia hạn.', booking });
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({ message: err.message || 'Xin gia hạn thất bại.' });
+  }
+};
+
+export const extensionCancel = async (req, res) => {
+  try {
+    const booking = await bookingService.cancelBookingExtensionRequest(req.auth.userId, req.params.id);
+    res.json({ message: 'Đã hủy yêu cầu gia hạn.', booking });
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({ message: err.message || 'Hủy gia hạn thất bại.' });
+  }
+};

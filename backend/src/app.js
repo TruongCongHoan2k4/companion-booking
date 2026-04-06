@@ -9,6 +9,10 @@ import walletRoute from './routes/wallet.route.js';
 import bookingRoute from './routes/booking.route.js';
 import adminRoute from './routes/admin.route.js';
 import companionNotifyRoute from './routes/companionNotify.route.js';
+import userNotifyRoute from './routes/userNotify.route.js';
+import favoriteRoute from './routes/favorite.route.js';
+import reviewRoute from './routes/review.route.js';
+import reportRoute from './routes/report.route.js';
 import { configureCloudinary } from './config/cloudinary.config.js';
 import { errorHandler } from './middleware/errorHandler.middleware.js';
 
@@ -35,6 +39,10 @@ app.use('/api/companion', companionNotifyRoute);
 app.use('/api/wallet', walletRoute);
 app.use('/api/bookings', bookingRoute);
 app.use('/api/admin', adminRoute);
+app.use('/api/user', userNotifyRoute);
+app.use('/api/favorites', favoriteRoute);
+app.use('/api/reviews', reviewRoute);
+app.use('/api/reports', reportRoute);
 
 app.use(errorHandler);
 

@@ -20,6 +20,8 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 const httpServer = http.createServer(app);
 initRealtime(httpServer);
 
-httpServer.listen(PORT, () => {
-  console.log(`Server running on port http://localhost:${PORT}`);
+const HOST = process.env.HOST || '0.0.0.0';
+
+httpServer.listen(PORT, HOST, () => {
+  console.log(`Server running at http://${HOST}:${PORT}`);
 });

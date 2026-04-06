@@ -49,6 +49,16 @@ const bookingSchema = new mongoose.Schema({
   acceptedAt: Date,
   startedAt: Date,
   completedAt: Date,
+  /** Tổng số phút gia hạn đã được duyệt cho booking (từ companion). */
+  extensionMinutesApproved: {
+    type: Number,
+    default: 0,
+  },
+  /** Số phút khách đang xin gia hạn (chờ companion duyệt). */
+  pendingExtensionMinutes: {
+    type: Number,
+  },
+  extensionRequestedAt: Date,
   sosTriggered: {
     type: Boolean,
     default: false,

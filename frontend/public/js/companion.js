@@ -405,7 +405,7 @@ function resetCompanionProfileUploadState() {
 function applyProfileMediaFromServer(profile) {
   const st = companionProfileUploadState;
   st.serverIdentityUrl = profile.identityImageUrl || '';
-  st.serverPortraitUrl = profile.portraitImageUrl || '';
+  st.serverPortraitUrl = profile.portraitImageUrl || profile.avatarUrl || '';
   st.retainedIntroUrls = splitIntroMediaUrlString(profile.introMediaUrls);
   renderIdentityThumbPreview();
   renderPortraitThumbPreview();

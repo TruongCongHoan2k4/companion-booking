@@ -268,8 +268,61 @@ async function initSearchPage() {
   const keyword = document.getElementById('keyword');
   const form = document.getElementById('search-form');
   const grid = document.getElementById('companion-grid');
-  form?.addEventListener('submit', async (e) => {
-    e.preventDefault();
+
+  function readFilterValues() {
+    const genderEl = document.getElementById('gender');
+    const onlineEl = document.getElementById('online');
+    const areaEl = document.getElementById('area');
+
+    const genderValue = String(genderEl?.value || '').trim();
+    const locationValue = String(areaEl?.value || '').trim();
+
+    let onlineMode = 'all'; // 'all' | 'online' | 'offline'
+    if (onlineEl) {
+      if (onlineEl.type === 'checkbox') {
+        onlineMode = onlineEl.checked ? 'online' : 'all';
+      } else {
+        const v = String(onlineEl.value || '');
+        onlineMode = v === 'true' ? 'online' : v === 'false' ? 'offline' : 'all';
+      }
+    }
+
+    return { genderValue, onlineMode, locationValue };
+  }
+
+  function filterCompanions(data) {
+    const { genderValue, onlineMode, locationValue } = readFilterValues();
+    return (Array.isArray(data) ? data : [])
+      .filter((c) => {
+        if (genderValue) {
+          // UI có thể là MALE/FEMALE hoặc Nam/Nữ; backend seed hay dùng Nam/Nữ.
+          const g = String(c.gender || '').trim();
+          const match =
+            g === genderValue ||
+            (genderValue === 'MALE' && g.toLowerCase() === 'nam') ||
+            (genderValue === 'FEMALE' && g.toLowerCase() === 'nữ');
+          if (!match) return false;
+        }
+        if (onlineMode !== 'all') {
+          const online = Boolean(c.isOnline === true || c.onlineStatus === true);
+          if (onlineMode === 'online' && !online) return false;
+          if (onlineMode === 'offline' && online) return false;
+        }
+        if (locationValue) {
+          const loc = String(c.location || c.area || '').trim();
+          if (!loc.toLowerCase().includes(locationValue.toLowerCase())) return false;
+        }
+        return true;
+      });
+  }
+
+  function renderCompanionList(list) {
+    grid.innerHTML = list.length
+      ? list.map(companionCard).join('')
+      : `<div class="empty-state">Không tìm thấy kết quả phù hợp.</div>`;
+  }
+
+  async function runSearch() {
     const q = (keyword.value || '').trim().toLowerCase();
     const params = new URLSearchParams();
     ['serviceType', 'area', 'gender', 'minPrice', 'maxPrice', 'online'].forEach((id) => {
@@ -278,14 +331,27 @@ async function initSearchPage() {
     });
     const api = await apiFetch(`/api/companions/search?${params.toString()}`, { headers: {} });
     companions = api.ok ? await api.json() : companions;
-    const filtered = companions.filter((c) => {
+
+    const byText = companions.filter((c) => {
       const text =
         `${c.user?.fullName || ''} ${c.user?.username || ''} ${c.bio || ''} ${c.hobbies || ''}`.toLowerCase();
       return !q || text.includes(q);
     });
-    grid.innerHTML = filtered.length
-      ? filtered.map(companionCard).join('')
-      : `<div class="empty-state">Không tìm thấy kết quả phù hợp.</div>`;
+    const filtered = filterCompanions(byText);
+    renderCompanionList(filtered);
+  }
+
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    await runSearch();
+  });
+
+  // lọc ngay khi thay đổi (giữ logic đơn giản, không jQuery)
+  ['gender', 'online', 'area'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('change', () => {
+      const filtered = filterCompanions(companions);
+      renderCompanionList(filtered);
+    });
   });
 }
 
@@ -312,41 +378,133 @@ async function initProfilePage(auth) {
     const hasRating = avg !== null && avg !== undefined && !Number.isNaN(Number(avg));
     const ratingText = hasRating ? `${Number(avg).toFixed(1)} ★ (${reviewCount})` : 'Chưa có đánh giá';
 
+    const avatar = companion.avatarUrl || companion.portraitImageUrl || '';
+    const album = parseCommaUrls(companion.introMediaUrls || '');
+    const venues = parseRentalVenuesLines(companion.rentalVenues);
+    const onlineBadge = companion.onlineStatus
+      ? `<span class="badge text-bg-success"><i class="bi bi-circle-fill me-1" style="font-size:.5rem"></i>Online</span>`
+      : `<span class="badge text-bg-secondary"><i class="bi bi-circle-fill me-1" style="font-size:.5rem"></i>Offline</span>`;
+
+    const albumHtml = album.length
+      ? `<div class="row g-2 mt-2">
+          ${album
+            .slice(0, 12)
+            .map((u) => {
+              const url = escapeHtml(u);
+              const isVideo = /\.(mp4|webm|mov)(\?|#|$)/i.test(u) || /\/video\//i.test(u);
+              return isVideo
+                ? `<div class="col-6 col-md-4">
+                     <video class="w-100 rounded border bg-dark" controls preload="metadata" style="aspect-ratio: 4 / 3; object-fit: cover;">
+                       <source src="${url}">
+                     </video>
+                   </div>`
+                : `<div class="col-6 col-md-4">
+                     <a href="${url}" target="_blank" rel="noopener">
+                       <img src="${url}" class="w-100 rounded border" style="aspect-ratio: 4 / 3; object-fit: cover;" alt="media">
+                     </a>
+                   </div>`;
+            })
+            .join('')}
+        </div>`
+      : `<div class="text-muted small mt-2">Chưa có album ảnh/video.</div>`;
+
     box.innerHTML = `
-            <div class="card user-card"><div class="card-body">
+      <div class="card user-card">
+        <div class="card-body p-3 p-md-4">
+          <div class="row g-4 align-items-start">
+            <div class="col-12 col-md-5 col-lg-4">
               ${
-                companion.avatarUrl
-                  ? `<img src="${escapeHtml(companion.avatarUrl)}" alt="avatar" class="img-fluid rounded mb-3" style="max-height:220px;object-fit:cover;">`
-                  : `<div class="d-flex align-items-center justify-content-center rounded mb-3" style="height:220px;background:linear-gradient(135deg,#6366f1,#8b5cf6);">
-                            <i class="bi bi-person-fill text-white" style="font-size:4rem;"></i>
-                         </div>`
+                avatar
+                  ? `<img src="${escapeHtml(avatar)}" alt="avatar" class="img-fluid rounded-4 border" style="width:100%; aspect-ratio: 4 / 3; object-fit: cover;">`
+                  : `<div class="d-flex align-items-center justify-content-center rounded-4 border" style="width:100%; aspect-ratio: 4 / 3; background:linear-gradient(135deg,#6366f1,#8b5cf6);">
+                       <i class="bi bi-person-fill text-white" style="font-size:4rem;"></i>
+                     </div>`
               }
-              <h1 class="h4 mb-1">${escapeHtml(name)}</h1>
-              <div class="mb-3 text-warning fw-bold">${escapeHtml(ratingText)}</div>
-              <p><strong>Bio:</strong> ${escapeHtml(companion.bio || 'Chưa có')}</p>
-              <p><strong>Sở thích:</strong> ${escapeHtml(companion.hobbies || 'Chưa có')}</p>
-              <p><strong>Ngoại hình:</strong> ${escapeHtml(companion.appearance || 'Chưa có')}</p>
-              <p><strong>Thời gian rảnh:</strong> ${escapeHtml(companion.availability || 'Chưa có')}</p>
-              <p><strong>Dịch vụ:</strong> ${escapeHtml(companion.serviceType || '-')}</p>
-              <p><strong>Giá (theo dịch vụ):</strong> ${escapeHtml(formatCompanionHourlyPriceRange(companion))}</p>
-              <p><strong>Khu vực:</strong> ${escapeHtml(companion.area || '-')} | <strong>Giới tính:</strong> ${escapeHtml(companion.gender || '-')}</p>
-              ${
-                parseRentalVenuesLines(companion.rentalVenues).length
-                  ? `<p><strong>Nơi thuê (gợi ý):</strong><br>${parseRentalVenuesLines(companion.rentalVenues)
-                      .map((v) => `<span class="badge bg-light text-dark border me-1 mb-1">${escapeHtml(v)}</span>`)
-                      .join('')}</p>`
-                  : `<p class="text-muted small mb-0"><strong>Nơi thuê:</strong> Companion chưa công bố danh sách trong hồ sơ.</p>`
-              }
-              <p><strong>Tỷ lệ phản hồi:</strong> ${Number(companion.responseRate || 0).toFixed(0)}%</p>
-              ${companion.introVideoUrl ? `<a class="btn btn-sm btn-outline-dark mb-3" href="${escapeHtml(companion.introVideoUrl)}" target="_blank">Xem video giới thiệu</a>` : ''}
-              <div class="d-flex gap-2 flex-wrap">
-                <a class="btn btn-primary" href="./booking.html?id=${companion.id}">Đặt lịch</a>
-                <a class="btn btn-outline-secondary" href="./review.html">Đánh giá</a>
-                <a class="btn btn-outline-warning" href="./report.html?reportedUserId=${companion.user?.id || ''}">Tố cáo / SOS</a>
-                ${auth.authenticated ? `<button id="add-favorite-btn" class="btn btn-outline-danger">Thêm yêu thích</button>` : ''}
+              <div class="d-flex flex-wrap gap-2 mt-3 align-items-center">
+                ${onlineBadge}
+                <span class="badge text-bg-warning">${escapeHtml(ratingText)}</span>
+              </div>
+              <div class="d-grid gap-2 mt-3">
+                <a class="btn btn-primary" href="./booking.html?id=${escapeHtml(companion.id)}"><i class="bi bi-calendar-plus me-1"></i>Đặt lịch</a>
+                <div class="d-flex gap-2">
+                  <a class="btn btn-outline-warning flex-grow-1" href="./report.html?reportedUserId=${escapeHtml(companion.user?.id || '')}"><i class="bi bi-flag me-1"></i>Tố cáo / SOS</a>
+                  ${auth.authenticated ? `<button id="add-favorite-btn" class="btn btn-outline-danger"><i class="bi bi-heart me-1"></i>Yêu thích</button>` : ''}
+                </div>
               </div>
               <div id="profile-message" class="mt-3"></div>
-            </div></div>`;
+            </div>
+
+            <div class="col-12 col-md-7 col-lg-8">
+              <div class="d-flex flex-wrap align-items-baseline justify-content-between gap-2">
+                <div>
+                  <h1 class="h4 mb-1 fw-bold">${escapeHtml(name)}</h1>
+                  <div class="text-muted small">@${escapeHtml(companion.user?.username || '')}</div>
+                </div>
+                <div class="text-end">
+                  <div class="small text-muted">Giá</div>
+                  <div class="fw-bold text-primary">${escapeHtml(formatCompanionHourlyPriceRange(companion))}</div>
+                </div>
+              </div>
+
+              <hr class="my-3" />
+
+              <div class="row g-3">
+                <div class="col-12">
+                  <div class="fw-semibold mb-1">Tiểu sử</div>
+                  <div class="text-body">${escapeHtml(companion.bio || 'Chưa có')}</div>
+                </div>
+                <div class="col-12 col-lg-6">
+                  <div class="fw-semibold mb-1">Khu vực</div>
+                  <div>${escapeHtml(companion.area || '-')}</div>
+                </div>
+                <div class="col-6 col-lg-3">
+                  <div class="fw-semibold mb-1">Giới tính</div>
+                  <div>${escapeHtml(companion.gender || '-')}</div>
+                </div>
+                <div class="col-6 col-lg-3">
+                  <div class="fw-semibold mb-1">Hạng game</div>
+                  <div>${escapeHtml(companion.gameRank || '-')}</div>
+                </div>
+                <div class="col-12 col-lg-6">
+                  <div class="fw-semibold mb-1">Sở thích</div>
+                  <div>${escapeHtml(companion.hobbies || 'Chưa có')}</div>
+                </div>
+                <div class="col-12 col-lg-6">
+                  <div class="fw-semibold mb-1">Thời gian rảnh</div>
+                  <div>${escapeHtml(companion.availability || 'Chưa có')}</div>
+                </div>
+                <div class="col-12">
+                  <div class="fw-semibold mb-1">Dịch vụ</div>
+                  <div>${escapeHtml(companion.serviceType || '-')}</div>
+                </div>
+                <div class="col-12">
+                  <div class="fw-semibold mb-2">Nơi thuê (gợi ý)</div>
+                  ${
+                    venues.length
+                      ? `<div class="d-flex flex-wrap gap-2">${venues
+                          .slice(0, 24)
+                          .map((v) => `<span class="badge bg-light text-dark border">${escapeHtml(v)}</span>`)
+                          .join('')}</div>`
+                      : `<div class="text-muted small">Companion chưa công bố danh sách trong hồ sơ.</div>`
+                  }
+                </div>
+              </div>
+
+              <hr class="my-4" />
+
+              <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+                <div class="fw-bold">Album ảnh / video giới thiệu</div>
+                ${
+                  companion.introVideoUrl
+                    ? `<a class="btn btn-sm btn-outline-dark" href="${escapeHtml(companion.introVideoUrl)}" target="_blank" rel="noopener"><i class="bi bi-play-circle me-1"></i>Video giới thiệu</a>`
+                    : ''
+                }
+              </div>
+              ${albumHtml}
+            </div>
+          </div>
+        </div>
+      </div>`;
 
     const addBtn = document.getElementById('add-favorite-btn');
     if (addBtn) {
@@ -790,7 +948,7 @@ async function initReviewPage(auth) {
 
   document.getElementById('review-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const bookingId = Number(bookingSelect.value);
+    const bookingId = String(bookingSelect.value || '').trim();
     if (!bookingId) {
       setMessage('review-message', 'warning', 'Bạn cần có lịch hẹn COMPLETED để đánh giá.');
       return;
@@ -928,11 +1086,11 @@ async function initReportPage(auth) {
     }
     const bookingIdParam = params.get('bookingId');
     const payload = {
-      reportedUserId: Number(reportedUserInput.value),
+      reportedUserId: String(reportedUserInput.value || '').trim(),
       reason: document.getElementById('reason').value,
       category: document.getElementById('reportCategory').value,
       emergency: isEmergency,
-      bookingId: bookingIdParam ? Number(bookingIdParam) : null,
+      bookingId: bookingIdParam ? String(bookingIdParam).trim() : null,
       reporterLatitude,
       reporterLongitude,
     };
@@ -1307,8 +1465,9 @@ async function initNotificationsPage(auth) {
 async function initWalletPage(auth) {
   if (!requireLogin(auth)) return;
   const walletRes = await apiFetch('/api/wallet/me', { headers: {} });
-  const wallet = walletRes.ok ? await walletRes.json() : { balance: 0 };
-  document.getElementById('wallet-balance').textContent = `${Number(wallet.balance || 0).toLocaleString('vi-VN')} VND`;
+  const wallet = walletRes.ok ? await walletRes.json() : { walletBalance: '0' };
+  const bal = wallet.walletBalance ?? wallet.balance ?? 0;
+  document.getElementById('wallet-balance').textContent = `${Number(bal || 0).toLocaleString('vi-VN')} VND`;
 
   document.getElementById('deposit-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1327,8 +1486,9 @@ async function initWalletPage(auth) {
     }
   });
 
-  const txRes = await apiFetch('/api/wallet/transactions', { headers: {} });
-  const txs = txRes.ok ? await txRes.json() : [];
+  const txRes = await apiFetch('/api/wallet/me', { headers: {} });
+  const wallet2 = txRes.ok ? await txRes.json() : { transactions: [] };
+  const txs = Array.isArray(wallet2?.transactions) ? wallet2.transactions : [];
   const box = document.getElementById('wallet-transactions');
   box.innerHTML = txs.length
     ? txs

@@ -12,9 +12,9 @@ export const me = async (req, res) => {
 
 export const deposit = async (req, res) => {
   try {
-    const result = await walletService.depositMock(req.auth.userId, req.body.amount);
+    const result = await walletService.deposit(req.auth.userId, req.body.amount, req.body.provider);
     res.status(201).json({
-      message: 'Nạp tiền (mock) thành công.',
+      message: 'Nạp tiền thành công.',
       walletBalance: result.walletBalance,
     });
   } catch (err) {

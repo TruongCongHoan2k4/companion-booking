@@ -47,34 +47,37 @@ export function initRealtime(server) {
   });
 
   io.use((socket, next) => {
+    // Dev-friendly: cho phép kết nối socket ngay cả khi chưa đăng nhập.
+    // Nếu có token hợp lệ thì attach userId/role; nếu không thì vẫn next() để tránh proxy ECONNRESET spam.
     try {
       const token = getTokenFromHandshake(socket.handshake);
-      if (!token) {
-        return next(new Error('UNAUTHORIZED'));
-      }
       const secret = process.env.ACCESS_TOKEN_SECRET;
-      if (!secret) {
-        return next(new Error('UNAUTHORIZED'));
+      if (token && secret) {
+        const decoded = jwt.verify(token, secret);
+        const sub = decoded.sub || decoded.userId || decoded.id;
+        if (sub) {
+          socket.data.userId = String(sub);
+          socket.data.role = decoded.role;
+        }
       }
-      const decoded = jwt.verify(token, secret);
-      const sub = decoded.sub || decoded.userId || decoded.id;
-      if (!sub) {
-        return next(new Error('UNAUTHORIZED'));
-      }
-      socket.data.userId = String(sub);
-      socket.data.role = decoded.role;
-      next();
     } catch {
-      next(new Error('UNAUTHORIZED'));
+      // ignore
     }
+    next();
   });
 
   io.on('connection', (socket) => {
     const uid = socket.data.userId;
-    socket.join(roomUser(uid));
+    if (uid) {
+      socket.join(roomUser(uid));
+    }
 
     socket.on('join_room', async (payload, ack) => {
       try {
+        if (!uid) {
+          ack?.({ ok: false, message: 'UNAUTHORIZED' });
+          return;
+        }
         const bookingId = payload?.bookingId;
         if (!bookingId || typeof bookingId !== 'string') {
           ack?.({ ok: false, message: 'Thiếu bookingId.' });
@@ -94,6 +97,10 @@ export function initRealtime(server) {
 
     socket.on('send_message', async (payload, ack) => {
       try {
+        if (!uid) {
+          ack?.({ ok: false, message: 'UNAUTHORIZED' });
+          return;
+        }
         const bookingId = payload?.bookingId;
         const content = typeof payload?.content === 'string' ? payload.content.trim() : '';
         if (!bookingId || !content) {

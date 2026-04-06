@@ -34,11 +34,13 @@ export default defineConfig(({ mode }) => {
     root: __dirname,
     publicDir: false,
     server: {
+      host: true,
       port: 5173,
       strictPort: false,
       proxy,
     },
     preview: {
+      host: true,
       port: 4173,
       strictPort: false,
       proxy,

@@ -36,12 +36,12 @@ meRouter.post(
 meRouter.post(
   '/bookings/:bookingId/extension/accept',
   validateMongoIdParam('bookingId'),
-  companionMeController.extensionStub
+  companionMeController.acceptExtension
 );
 meRouter.post(
   '/bookings/:bookingId/extension/reject',
   validateMongoIdParam('bookingId'),
-  companionMeController.extensionStub
+  companionMeController.rejectExtension
 );
 
 meRouter.get('/profile', companionMeController.getProfile);

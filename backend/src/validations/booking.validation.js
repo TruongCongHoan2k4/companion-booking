@@ -14,3 +14,7 @@ export const createBookingSchema = Joi.object({
 export const bookingWorkflowSchema = Joi.object({
   action: Joi.string().valid('ACCEPT', 'REJECT').required(),
 });
+
+export const bookingExtensionRequestSchema = Joi.object({
+  extraMinutes: Joi.number().integer().valid(30).required(),
+});

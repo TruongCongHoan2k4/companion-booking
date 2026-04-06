@@ -59,6 +59,26 @@ export const extensionStub = (req, res) => {
   res.json({ ok: true, message: 'Gia hạn chưa được kích hoạt trên backend.' });
 };
 
+export const acceptExtension = async (req, res) => {
+  try {
+    const booking = await companionMeService.decideBookingExtension(req.auth.userId, req.params.bookingId, 'ACCEPT');
+    res.json({ ok: true, booking });
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({ message: err.message || 'Không thể chấp nhận gia hạn.' });
+  }
+};
+
+export const rejectExtension = async (req, res) => {
+  try {
+    const booking = await companionMeService.decideBookingExtension(req.auth.userId, req.params.bookingId, 'REJECT');
+    res.json({ ok: true, booking });
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({ message: err.message || 'Không thể từ chối gia hạn.' });
+  }
+};
+
 export const getProfile = async (req, res) => {
   try {
     res.json(companionMeService.toCompanionProfileJson(req.companion));

@@ -21,6 +21,9 @@ function isTxnUnsupported(err) {
 export function serializeBooking(doc) {
   if (!doc) return doc;
   const o = typeof doc.toObject === 'function' ? doc.toObject() : { ...doc };
+  if (o._id != null && o.id == null) {
+    o.id = String(o._id);
+  }
   ['servicePricePerHour', 'holdAmount'].forEach((k) => {
     const v = o[k];
     if (v != null && typeof v === 'object' && typeof v.toString === 'function') {
@@ -370,6 +373,115 @@ export async function checkOutBooking(userId, role, bookingId) {
   return serializeBooking(booking);
 }
 
+export async function cancelBooking(userId, role, bookingId) {
+  const booking = await assertBookingParticipantMutable(bookingId, userId, role);
+  if (role !== 'CUSTOMER') {
+    const err = new Error('Chỉ khách hàng mới được hủy đơn.');
+    err.status = 403;
+    throw err;
+  }
+  if (!['PENDING', 'ACCEPTED'].includes(booking.status)) {
+    const err = new Error('Chỉ hủy được khi đơn đang PENDING hoặc ACCEPTED.');
+    err.status = 400;
+    throw err;
+  }
+  booking.status = 'CANCELLED';
+  await booking.save();
+
+  // hoàn cọc (tối giản): cộng lại vào ví khách + ghi REFUND
+  const refund = decimal128ToBigInt(booking.holdAmount);
+  if (refund > 0n) {
+    const customer = await User.findById(booking.customer);
+    if (customer) {
+      const cBal = decimal128ToBigInt(customer.balance);
+      customer.balance = bigIntToDecimal128(cBal + refund);
+      await customer.save();
+    }
+    await WalletTransaction.create({
+      user: booking.customer,
+      booking: booking._id,
+      amount: bigIntToDecimal128(refund),
+      type: 'REFUND',
+      description: 'Hoàn cọc — khách hủy đơn',
+    });
+  }
+  return serializeBooking(booking);
+}
+
+export async function requestBookingExtension(customerUserId, bookingId, extraMinutes) {
+  const booking = await assertBookingParticipantMutable(bookingId, customerUserId, 'CUSTOMER');
+  if (!['ACCEPTED', 'IN_PROGRESS'].includes(booking.status)) {
+    const err = new Error('Chỉ xin gia hạn khi đơn đã ACCEPTED hoặc IN_PROGRESS.');
+    err.status = 400;
+    throw err;
+  }
+  const extra = Number(extraMinutes);
+  if (!Number.isFinite(extra) || extra !== 30) {
+    const err = new Error('extraMinutes không hợp lệ (chỉ hỗ trợ 30 phút).');
+    err.status = 400;
+    throw err;
+  }
+  const used = Number(booking.extensionMinutesApproved || 0);
+  const pending = booking.pendingExtensionMinutes != null ? Number(booking.pendingExtensionMinutes) : 0;
+  const max = 120;
+  const remaining = max - used - pending;
+  if (remaining < extra) {
+    const err = new Error('Bạn đã vượt giới hạn gia hạn cho booking này.');
+    err.status = 400;
+    throw err;
+  }
+  booking.pendingExtensionMinutes = extra;
+  booking.extensionRequestedAt = new Date();
+  await booking.save();
+  return serializeBooking(booking);
+}
+
+export async function cancelBookingExtensionRequest(customerUserId, bookingId) {
+  const booking = await assertBookingParticipantMutable(bookingId, customerUserId, 'CUSTOMER');
+  if (booking.pendingExtensionMinutes == null) {
+    const err = new Error('Không có yêu cầu gia hạn nào để hủy.');
+    err.status = 400;
+    throw err;
+  }
+  booking.pendingExtensionMinutes = undefined;
+  await booking.save();
+  return serializeBooking(booking);
+}
+
+export async function companionDecideExtension(companionUserId, bookingId, decision) {
+  const companion = await Companion.findOne({ user: companionUserId });
+  if (!companion) {
+    const err = new Error('Không tìm thấy companion.');
+    err.status = 404;
+    throw err;
+  }
+  const booking = await Booking.findById(bookingId);
+  if (!booking) {
+    const err = new Error('Không tìm thấy đơn đặt lịch.');
+    err.status = 404;
+    throw err;
+  }
+  if (String(booking.companion) !== String(companion._id)) {
+    const err = new Error('Bạn không có quyền xử lý gia hạn đơn này.');
+    err.status = 403;
+    throw err;
+  }
+  if (booking.pendingExtensionMinutes == null) {
+    const err = new Error('Không có yêu cầu gia hạn đang chờ.');
+    err.status = 400;
+    throw err;
+  }
+  const pending = Number(booking.pendingExtensionMinutes || 0);
+  booking.pendingExtensionMinutes = undefined;
+  if (decision === 'ACCEPT') {
+    const used = Number(booking.extensionMinutesApproved || 0);
+    booking.extensionMinutesApproved = used + pending;
+    booking.duration = Number(booking.duration || 0) + pending;
+  }
+  await booking.save();
+  return serializeBooking(booking);
+}
+
 export async function listBookingsForUser(userId, role, query) {
   const status = query.status;
   const filter = {};
@@ -389,6 +501,14 @@ export async function listBookingsForUser(userId, role, query) {
     return [];
   }
 
-  const rows = await Booking.find(filter).sort({ createdAt: -1 }).limit(100).lean();
+  const rows = await Booking.find(filter)
+    .populate({
+      path: 'companion',
+      populate: { path: 'user', select: 'username fullName' },
+    })
+    .populate({ path: 'customer', select: 'username fullName' })
+    .sort({ createdAt: -1 })
+    .limit(100)
+    .lean();
   return rows.map((b) => serializeBooking(b));
 }
