@@ -8,6 +8,7 @@ import Withdrawal from '../models/withdrawal.model.js';
 import PlatformSettings from '../models/platformSettings.model.js';
 import WalletTransaction from '../models/walletTransaction.model.js';
 import { bigIntToDecimal128, decimal128ToBigInt } from '../utils/money.util.js';
+import { publishNotification } from '../realtime/realtimeBroadcastService.js';
 
 function escapeRegex(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -44,25 +45,48 @@ function isTxnUnsupported(err) {
 
 async function notifyUser(userId, title, content) {
   if (!userId) return;
-  await Notification.create({
+  const n = await Notification.create({
     user: userId,
     title,
     content,
     isRead: false,
   });
+  const full = await Notification.findById(n._id).populate('user');
+  publishNotification(full);
 }
 
 export async function listPendingCompanions(keyword) {
   const list = await Companion.find({ status: 'PENDING' })
-    .populate('user', 'username')
+    .populate('user', 'username email fullName')
     .sort({ updatedAt: -1 })
     .lean();
 
   const mapped = list.map((c) => ({
     id: String(c._id),
-    user: { username: c.user?.username || '' },
-    bio: c.bio || '',
+    user: {
+      id: c.user?._id ? String(c.user._id) : '',
+      username: c.user?.username || '',
+      email: c.user?.email || '',
+      fullName: c.user?.fullName || '',
+    },
     status: c.status,
+    bio: c.bio || '',
+    hobbies: c.hobbies || '',
+    appearance: c.appearance || '',
+    availability: c.availability || '',
+    serviceType: c.serviceType || '',
+    area: c.area || '',
+    rentalVenues: c.rentalVenues || '',
+    gender: c.gender || '',
+    gameRank: c.gameRank || '',
+    avatarUrl: c.avatarUrl || '',
+    coverImageUrl: c.coverImageUrl || '',
+    introVideoUrl: c.introVideoUrl || '',
+    introMediaUrls: c.introMediaUrls || '',
+    skills: c.skills || '',
+    identityNumber: c.identityNumber || '',
+    identityImageUrl: c.identityImageUrl || '',
+    portraitImageUrl: c.portraitImageUrl || '',
   }));
 
   const q = keyword && String(keyword).trim();

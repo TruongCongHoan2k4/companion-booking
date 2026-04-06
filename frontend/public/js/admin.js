@@ -370,10 +370,53 @@ const companionReviewState = {
 
 function renderCompanionReviewDetail(item) {
   const user = item?.user || {};
-  const toLink = (url) => {
+  const isVideoUrl = (url) => /\.(mp4|webm|mov)(\?|#|$)/i.test(String(url || ''));
+  const toLink = (url, label) => {
     if (!url) return '<span class="text-muted">Không có</span>';
-    return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`;
+    const text = label || url;
+    return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`;
   };
+  const toImage = (url) => {
+    if (!url) return '<span class="text-muted">Không có</span>';
+    return `
+      <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="d-inline-block">
+        <img src="${escapeHtml(url)}" alt="image" class="img-thumbnail" style="max-width:220px;max-height:220px;object-fit:cover" />
+      </a>
+      <div class="small text-muted mt-1">${toLink(url, 'Mở ảnh')}</div>
+    `;
+  };
+  const toVideo = (url) => {
+    if (!url) return '<span class="text-muted">Không có</span>';
+    return `
+      <video src="${escapeHtml(url)}" controls style="width:100%;max-height:320px;background:#111;border-radius:12px;"></video>
+      <div class="small text-muted mt-1">${toLink(url, 'Mở video')}</div>
+    `;
+  };
+  const introMediaList = String(item?.introMediaUrls || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const introMediaHtml = (() => {
+    if (!introMediaList.length) return '<span class="text-muted">Không có</span>';
+    const cards = introMediaList
+      .slice(0, 24)
+      .map((url) => {
+        if (isVideoUrl(url)) {
+          return `<div class="col-12 col-md-6">
+              <div class="border rounded-3 p-2">
+                ${toVideo(url)}
+              </div>
+            </div>`;
+        }
+        return `<div class="col-6 col-md-4 col-lg-3">
+            <div class="border rounded-3 p-2 h-100 d-flex flex-column">
+              ${toImage(url)}
+            </div>
+          </div>`;
+      })
+      .join('');
+    return `<div class="row g-2">${cards}</div>`;
+  })();
   return `
         <div class="row g-3">
             <div class="col-md-6"><div><strong>ID hồ sơ:</strong> ${item?.id ?? '-'}</div></div>
@@ -390,10 +433,12 @@ function renderCompanionReviewDetail(item) {
             <div class="col-12"><div><strong>Ngoại hình:</strong><div class="text-muted mt-1">${escapeHtml(item?.appearance || '-')}</div></div></div>
             <div class="col-12"><div><strong>Lịch rảnh:</strong><div class="text-muted mt-1">${escapeHtml(item?.availability || '-')}</div></div></div>
             <div class="col-md-4"><div><strong>Số CCCD/CMND:</strong> ${escapeHtml(item?.identityNumber || '-')}</div></div>
-            <div class="col-md-8"><div><strong>Ảnh CCCD:</strong> ${toLink(item?.identityImageUrl)}</div></div>
-            <div class="col-md-12"><div><strong>Ảnh chân dung:</strong> ${toLink(item?.portraitImageUrl)}</div></div>
-            <div class="col-md-12"><div><strong>Avatar:</strong> ${toLink(item?.avatarUrl)}</div></div>
-            <div class="col-md-12"><div><strong>Video giới thiệu:</strong> ${toLink(item?.introVideoUrl)}</div></div>
+            <div class="col-md-12"><div><strong>Ảnh CCCD:</strong><div class="mt-2">${toImage(item?.identityImageUrl)}</div></div></div>
+            <div class="col-md-12"><div><strong>Ảnh chân dung:</strong><div class="mt-2">${toImage(item?.portraitImageUrl)}</div></div></div>
+            <div class="col-md-12"><div><strong>Avatar:</strong><div class="mt-2">${toImage(item?.avatarUrl)}</div></div></div>
+            <div class="col-md-12"><div><strong>Ảnh bìa:</strong><div class="mt-2">${toImage(item?.coverImageUrl)}</div></div></div>
+            <div class="col-md-12"><div><strong>Video giới thiệu:</strong><div class="mt-2">${toVideo(item?.introVideoUrl)}</div></div></div>
+            <div class="col-md-12"><div><strong>Album (ảnh/video):</strong><div class="mt-2">${introMediaHtml}</div></div></div>
         </div>
     `;
 }

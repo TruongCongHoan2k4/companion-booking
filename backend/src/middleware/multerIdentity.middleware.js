@@ -9,7 +9,7 @@ const IMAGE_MIME = /^image\/(jpeg|jpg|png|webp|heic|heif)$/i;
 const VIDEO_MIME = /^video\/(mp4|webm|quicktime)$/i;
 
 function fileFilter(req, file, cb) {
-  if (file.fieldname === 'identityImage' || file.fieldname === 'avatar') {
+  if (file.fieldname === 'identityImage' || file.fieldname === 'avatar' || file.fieldname === 'cover') {
     if (!IMAGE_MIME.test(file.mimetype)) {
       return cb(new Error('Ảnh CCCD/đại diện chỉ chấp nhận JPEG, PNG, WebP (hoặc HEIC/HEIF).'));
     }
@@ -43,6 +43,7 @@ const MAX_INTRO_MEDIA = 12;
 const fields = [
   { name: 'identityImage', maxCount: 1 },
   { name: 'avatar', maxCount: 1 },
+  { name: 'cover', maxCount: 1 },
   { name: 'introVideo', maxCount: 1 },
   { name: 'introMedia', maxCount: MAX_INTRO_MEDIA },
 ];
@@ -81,6 +82,7 @@ export function identityUploadMiddleware(req, res, next) {
     const msg =
       checkSize(files?.identityImage, MAX_IMAGE_BYTES, 'Ảnh CCCD') ||
       checkSize(files?.avatar, MAX_IMAGE_BYTES, 'Ảnh đại diện') ||
+      checkSize(files?.cover, MAX_IMAGE_BYTES, 'Ảnh bìa') ||
       checkSize(files?.introVideo, MAX_VIDEO_BYTES, 'Video giới thiệu') ||
       introErr;
     if (msg) {

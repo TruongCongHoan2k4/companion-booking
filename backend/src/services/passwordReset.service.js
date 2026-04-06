@@ -4,7 +4,7 @@ import User from '../models/user.model.js';
 import PasswordResetOtp from '../models/passwordResetOtp.model.js';
 import { sendPasswordResetOtpEmail } from './email.service.js';
 
-const hotp = new OTP({ strategy: 'hotp' });
+const hotp = new OTP({ strategy: 'hotp', digits: 6 });
 const HOTP_COUNTER = 1;
 const SALT_ROUNDS = 12;
 

@@ -18,6 +18,9 @@ function proxyTargetFromEnv(env) {
 function proxyConfig(target) {
   return {
     '/api': { target, changeOrigin: true },
+    // Ảnh/video upload được backend serve dưới /uploads (khi không dùng Cloudinary).
+    // Dev server cần proxy để <img src="/uploads/..."> hoạt động trên origin Vite.
+    '/uploads': { target, changeOrigin: true },
     '/socket.io': { target, ws: true, changeOrigin: true },
     '/ws': { target, ws: true, changeOrigin: true },
     '/logout': { target, changeOrigin: true },

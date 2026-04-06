@@ -26,10 +26,17 @@ export async function getWalletMe(userId) {
     .sort({ createdAt: -1 })
     .limit(50)
     .lean();
-  const items = txs.map((t) => ({
-    ...t,
-    amount: t.amount != null && t.amount.toString ? t.amount.toString() : String(t.amount),
-  }));
+  const items = txs.map((t) => {
+    const raw = t.amount != null && t.amount.toString ? t.amount.toString() : String(t.amount);
+    const abs = BigInt((raw || '0').split('.')[0] || '0');
+    const negativeTypes = new Set(['HOLD', 'CHARGE']);
+    const signed = negativeTypes.has(t.type) ? -abs : abs;
+    return {
+      ...t,
+      amount: signed.toString(),
+      amountAbs: abs.toString(),
+    };
+  });
   // Backward-compatible: một số UI cũ đọc field `balance`
   return { walletBalance: bal, balance: bal, transactions: items };
 }

@@ -35,11 +35,39 @@ async function getOrCreateSettings() {
 export async function listCompanionBookings(userId) {
   const companion = await Companion.findOne({ user: userId }).lean();
   if (!companion) return [];
+  const settings = await getOrCreateSettings();
+  const rate = Number(settings.commissionRate ?? 0.15);
+
   const rows = await Booking.find({ companion: companion._id })
     .populate('customer', 'username fullName')
     .sort({ createdAt: -1 })
     .limit(100)
     .lean();
+
+  const bookingIds = rows.map((b) => b?._id).filter(Boolean);
+  const payoutRows =
+    bookingIds.length > 0
+      ? await WalletTransaction.find({
+          user: userId,
+          booking: { $in: bookingIds },
+          type: 'PAYOUT',
+        })
+          .select('booking createdAt amount')
+          .sort({ createdAt: -1 })
+          .lean()
+      : [];
+  const payoutByBookingId = new Map(
+    payoutRows
+      .filter((t) => t?.booking)
+      .map((t) => [
+        String(t.booking),
+        {
+          id: String(t._id),
+          createdAt: t.createdAt,
+          amount: decToNumber(t.amount),
+        },
+      ])
+  );
 
   return rows.map((b) => {
     const o = serializeBooking(b);
@@ -52,6 +80,27 @@ export async function listCompanionBookings(userId) {
         fullName: b.customer.fullName,
       };
     }
+
+    const gross = decimal128ToBigInt(b.holdAmount);
+    const commissionBp = BigInt(Math.max(0, Math.round(rate * 10000)));
+    const payout = payoutByBookingId.get(String(b._id)) || null;
+    const netFromTxn = payout?.amount != null ? BigInt(Math.max(0, Math.floor(Number(payout.amount)))) : null;
+    const computedCommission = (gross * commissionBp + 5000n) / 10000n; // round half up (basis points)
+    const computedNet = gross > computedCommission ? gross - computedCommission : 0n;
+
+    // Ưu tiên số liệu thực tế từ giao dịch ví (nếu có), để tránh lệch khi cấu hình thay đổi theo thời điểm.
+    const net = netFromTxn != null ? (netFromTxn > 0n ? netFromTxn : 0n) : computedNet;
+    const commission = netFromTxn != null ? (gross > net ? gross - net : 0n) : computedCommission;
+
+    o.pricing = {
+      currency: 'VND',
+      grossAmount: gross.toString(),
+      commissionRate: rate,
+      commissionAmount: commission.toString(),
+      netAmount: net.toString(),
+      payout,
+    };
+
     return o;
   });
 }

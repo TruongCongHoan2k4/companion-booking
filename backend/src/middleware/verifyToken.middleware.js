@@ -1,8 +1,25 @@
 import jwt from 'jsonwebtoken';
+import User from '../models/user.model.js';
 
 const COOKIE_NAME = 'accessToken';
 
-export const verifyToken = (req, res, next) => {
+async function assertNotLocked(userId) {
+  const u = await User.findById(userId).select('locked moderationFlag').lean();
+  if (!u) {
+    const err = new Error('Không tìm thấy người dùng.');
+    err.status = 401;
+    throw err;
+  }
+  if (u.locked || u.moderationFlag === 'BANNED') {
+    const err = new Error('Tài khoản đã bị khóa.');
+    err.status = 401;
+    err.code = 'ACCOUNT_LOCKED';
+    throw err;
+  }
+  return true;
+}
+
+export const verifyToken = async (req, res, next) => {
   try {
     const header = req.headers.authorization;
     const bearer =
@@ -28,8 +45,12 @@ export const verifyToken = (req, res, next) => {
       userId: String(sub),
       role: decoded.role,
     };
+    await assertNotLocked(req.auth.userId);
     next();
   } catch (err) {
+    if (err?.code === 'ACCOUNT_LOCKED') {
+      return res.status(401).json({ message: err.message || 'Tài khoản đã bị khóa.' });
+    }
     if (err.name === 'TokenExpiredError') {
       return res.status(401).json({ message: 'Phiên đăng nhập đã hết hạn.' });
     }
@@ -44,7 +65,7 @@ export const verifyToken = (req, res, next) => {
  * Gắn req.auth nếu có Bearer/cookie hợp lệ; không có token vẫn cho qua (cho API công khai).
  * Token hết hạn / sai → 401.
  */
-export const optionalVerifyToken = (req, res, next) => {
+export const optionalVerifyToken = async (req, res, next) => {
   try {
     const header = req.headers.authorization;
     const bearer =
@@ -70,8 +91,12 @@ export const optionalVerifyToken = (req, res, next) => {
       userId: String(sub),
       role: decoded.role,
     };
+    await assertNotLocked(req.auth.userId);
     next();
   } catch (err) {
+    if (err?.code === 'ACCOUNT_LOCKED') {
+      return res.status(401).json({ message: err.message || 'Tài khoản đã bị khóa.' });
+    }
     if (err.name === 'TokenExpiredError') {
       return res.status(401).json({ message: 'Phiên đăng nhập đã hết hạn.' });
     }

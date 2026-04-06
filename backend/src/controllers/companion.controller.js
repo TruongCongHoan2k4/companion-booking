@@ -56,10 +56,11 @@ export const updateIdentity = async (req, res) => {
     const files = req.files || {};
     const idImg = files.identityImage?.[0];
     const avatar = files.avatar?.[0];
+    const cover = files.cover?.[0];
     const video = files.introVideo?.[0];
     const introMediaList = Array.isArray(files.introMedia) ? files.introMedia : [];
 
-    const hasCoreFiles = Boolean(idImg || avatar || video);
+    const hasCoreFiles = Boolean(idImg || avatar || cover || video);
     const hasIntroAlbumFiles = introMediaList.length > 0;
     const hasFiles = hasCoreFiles || hasIntroAlbumFiles;
     const hasIdentityField = identityNumber !== undefined;
@@ -108,6 +109,20 @@ export const updateIdentity = async (req, res) => {
         });
         companion.portraitImageUrl = url;
         companion.avatarUrl = url;
+      }
+    }
+    if (cover) {
+      if (useCloudinary) {
+        const r = await uploadBufferToCloudinary(cover.buffer, {
+          folder: `${baseFolder}/cover`,
+          resourceType: 'image',
+        });
+        companion.coverImageUrl = r.secure_url;
+      } else {
+        companion.coverImageUrl = await saveBufferToUploads(cover.buffer, {
+          subdir: `${baseFolder}/cover`,
+          mime: cover.mimetype,
+        });
       }
     }
     if (video) {

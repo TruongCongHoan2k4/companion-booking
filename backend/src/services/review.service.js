@@ -1,6 +1,9 @@
 import mongoose from 'mongoose';
 import Review from '../models/review.model.js';
 import Booking from '../models/booking.model.js';
+import Notification from '../models/notification.model.js';
+import User from '../models/user.model.js';
+import { publishNotification } from '../realtime/realtimeBroadcastService.js';
 
 export async function createReview(customerUserId, body) {
   const bookingId = body.bookingId;
@@ -29,11 +32,64 @@ export async function createReview(customerUserId, body) {
     throw err;
   }
 
+  const existed = await Review.exists({ booking: booking._id });
   const doc = await Review.findOneAndUpdate(
     { booking: booking._id },
     { $set: { rating: body.rating, comment: body.comment || '' } },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   ).lean();
+
+  // Lưu snapshot rating vào booking (phục vụ UI/đối soát sau này).
+  // Không thay đổi nghiệp vụ hiện tại, chỉ lưu 1 field gọn nhẹ.
+  await Booking.updateOne(
+    { _id: booking._id },
+    { $set: { companionRatingForUser: Number(body.rating) } }
+  );
+
+  // Gửi thông báo cho companion khi có đánh giá mới (không spam nếu user sửa lại đánh giá).
+  if (!existed && booking.companion?.user?._id) {
+    const companionUserId = booking.companion.user._id;
+    const reviewerName = booking.customer?.toString?.() === String(customerUserId) ? 'Khách hàng' : 'Khách';
+    const title = 'Bạn có đánh giá mới';
+    const content = `${reviewerName} đã đánh giá booking #${String(booking._id)}: ${Number(body.rating)}★\n${String(
+      body.comment || ''
+    ).trim() || '—'}`;
+    const n = await Notification.create({
+      user: companionUserId,
+      title,
+      content,
+      isRead: false,
+    });
+    const full = await Notification.findById(n._id).populate('user');
+    publishNotification(full);
+  }
+
+  // Nếu đánh giá thấp (< 3.5★) thì cảnh báo tài khoản companion.
+  // Vì rating hiện là integer 1..5 nên điều kiện này tương đương 1..3 sao.
+  let companionWarned = false;
+  if (!existed && booking.companion?.user?._id && Number(body.rating) < 3.5) {
+    const companionUserId = booking.companion.user._id;
+    // Lưu ý: user cũ có thể thiếu field moderationFlag (default không auto backfill).
+    // Chỉ không hạ cờ nếu đang BANNED.
+    const u = await User.findById(companionUserId).select('_id moderationFlag').lean();
+    if (u && u.moderationFlag !== 'BANNED') {
+      const up = await User.updateOne({ _id: companionUserId }, { $set: { moderationFlag: 'WARNED' } });
+      companionWarned = (up.modifiedCount || 0) > 0;
+    }
+
+    const title = 'Cảnh báo đánh giá thấp';
+    const content = `Bạn vừa nhận đánh giá dưới 3,5★ cho booking #${String(
+      booking._id
+    )}. Tài khoản của bạn đã bị gắn cờ cảnh báo.`;
+    const n = await Notification.create({
+      user: companionUserId,
+      title,
+      content,
+      isRead: false,
+    });
+    const full = await Notification.findById(n._id).populate('user');
+    publishNotification(full);
+  }
 
   return {
     id: String(doc._id),
@@ -55,6 +111,13 @@ export async function createReview(customerUserId, body) {
     rating: doc.rating,
     comment: doc.comment || '',
     hidden: Boolean(doc.hidden),
+    warning: Number(body.rating) < 3.5
+      ? {
+          code: 'COMPANION_LOW_RATING_WARN',
+          message: 'Đánh giá dưới 3,5★: tài khoản companion sẽ bị cảnh báo.',
+          companionWarned,
+        }
+      : undefined,
     createdAt: doc.createdAt,
   };
 }

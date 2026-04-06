@@ -66,6 +66,10 @@ const companionSchema = new mongoose.Schema(
       type: String,
       maxlength: 500,
     },
+    coverImageUrl: {
+      type: String,
+      maxlength: 500,
+    },
     introMediaUrls: {
       type: String,
     },

@@ -17,7 +17,7 @@ const walletTransactionSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['DEPOSIT', 'HOLD', 'REFUND', 'CHARGE'],
+      enum: ['DEPOSIT', 'HOLD', 'REFUND', 'CHARGE', 'PAYOUT'],
       required: true,
     },
     provider: {

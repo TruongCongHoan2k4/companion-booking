@@ -109,6 +109,12 @@ function fmtDateTime(value) {
   return new Date(value).toLocaleString('vi-VN');
 }
 
+function fmtMoneyVnd(value) {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n)) return '0 ₫';
+  return `${n.toLocaleString('vi-VN')} ₫`;
+}
+
 const companionChartState = {
   range: 'month',
   bookingChart: null,
@@ -279,13 +285,16 @@ const MAX_INTRO_MEDIA_FILES_PER_SAVE = 12;
 const companionProfileUploadState = {
   identityFile: null,
   portraitFile: null,
+  coverFile: null,
   albumFiles: [],
   retainedIntroUrls: [],
   identityPreviewUrl: null,
   portraitPreviewUrl: null,
+  coverPreviewUrl: null,
   albumPreviewUrls: [],
   serverIdentityUrl: '',
   serverPortraitUrl: '',
+  serverCoverUrl: '',
 };
 
 let companionProfileUploadInited = false;
@@ -377,6 +386,20 @@ function renderPortraitThumbPreview() {
   }
 }
 
+function renderCoverThumbPreview() {
+  const wrap = document.getElementById('cover-image-preview');
+  if (!wrap) return;
+  wrap.replaceChildren();
+  const st = companionProfileUploadState;
+  if (st.coverFile && st.coverPreviewUrl) {
+    wrap.appendChild(buildMediaThumb(st.coverPreviewUrl, 'image', clearCoverUploadSelection));
+    return;
+  }
+  if (st.serverCoverUrl) {
+    wrap.appendChild(buildMediaThumb(st.serverCoverUrl, 'image', null));
+  }
+}
+
 function renderIntroAlbumPreview() {
   const wrap = document.getElementById('intro-media-preview');
   if (!wrap) return;
@@ -427,26 +450,41 @@ function clearPortraitUploadSelection() {
   renderPortraitThumbPreview();
 }
 
+function clearCoverUploadSelection() {
+  const st = companionProfileUploadState;
+  revokeBlobUrl(st.coverPreviewUrl);
+  st.coverFile = null;
+  st.coverPreviewUrl = null;
+  const input = document.getElementById('cover-image-file');
+  if (input) input.value = '';
+  renderCoverThumbPreview();
+}
+
 function resetCompanionProfileUploadState() {
   const st = companionProfileUploadState;
   revokeBlobUrl(st.identityPreviewUrl);
   revokeBlobUrl(st.portraitPreviewUrl);
+  revokeBlobUrl(st.coverPreviewUrl);
   st.albumPreviewUrls.forEach((u) => revokeBlobUrl(u));
   st.identityFile = null;
   st.portraitFile = null;
+  st.coverFile = null;
   st.albumFiles = [];
   st.retainedIntroUrls = [];
   st.identityPreviewUrl = null;
   st.portraitPreviewUrl = null;
+  st.coverPreviewUrl = null;
   st.albumPreviewUrls = [];
   st.serverIdentityUrl = '';
   st.serverPortraitUrl = '';
-  ['identity-image-file', 'portrait-image-file', 'intro-media-files'].forEach((id) => {
+  st.serverCoverUrl = '';
+  ['identity-image-file', 'portrait-image-file', 'cover-image-file', 'intro-media-files'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
   renderIdentityThumbPreview();
   renderPortraitThumbPreview();
+  renderCoverThumbPreview();
   renderIntroAlbumPreview();
 }
 
@@ -454,9 +492,11 @@ function applyProfileMediaFromServer(profile) {
   const st = companionProfileUploadState;
   st.serverIdentityUrl = profile.identityImageUrl || '';
   st.serverPortraitUrl = profile.portraitImageUrl || profile.avatarUrl || '';
+  st.serverCoverUrl = profile.coverImageUrl || '';
   st.retainedIntroUrls = splitIntroMediaUrlString(profile.introMediaUrls);
   renderIdentityThumbPreview();
   renderPortraitThumbPreview();
+  renderCoverThumbPreview();
   renderIntroAlbumPreview();
 }
 
@@ -495,12 +535,14 @@ function initCompanionProfileUploads() {
   if (document.body.dataset.page !== 'companion-profile') return;
   const idInput = document.getElementById('identity-image-file');
   const portraitInput = document.getElementById('portrait-image-file');
+  const coverInput = document.getElementById('cover-image-file');
   const albumInput = document.getElementById('intro-media-files');
-  if (!idInput || !portraitInput || !albumInput) return;
+  if (!idInput || !portraitInput || !coverInput || !albumInput) return;
   companionProfileUploadInited = true;
 
   const idZone = document.getElementById('identity-image-dropzone');
   const portraitZone = document.getElementById('portrait-image-dropzone');
+  const coverZone = document.getElementById('cover-image-dropzone');
   const albumZone = document.getElementById('intro-media-dropzone');
 
   bindDropzone(idZone, idInput, (files) => {
@@ -559,6 +601,35 @@ function initCompanionProfileUploads() {
     st.portraitFile = f;
     st.portraitPreviewUrl = URL.createObjectURL(f);
     renderPortraitThumbPreview();
+  });
+
+  bindDropzone(coverZone, coverInput, (files) => {
+    const f = files[0];
+    if (!f || !f.type.startsWith('image/')) {
+      showAlert('Vui lòng chọn file ảnh bìa.', 'warning');
+      return;
+    }
+    const st = companionProfileUploadState;
+    revokeBlobUrl(st.coverPreviewUrl);
+    st.coverFile = f;
+    st.coverPreviewUrl = URL.createObjectURL(f);
+    coverInput.value = '';
+    renderCoverThumbPreview();
+  });
+
+  coverInput.addEventListener('change', () => {
+    const f = coverInput.files?.[0];
+    if (!f) return;
+    if (!f.type.startsWith('image/')) {
+      showAlert('Vui lòng chọn file ảnh bìa.', 'warning');
+      coverInput.value = '';
+      return;
+    }
+    const st = companionProfileUploadState;
+    revokeBlobUrl(st.coverPreviewUrl);
+    st.coverFile = f;
+    st.coverPreviewUrl = URL.createObjectURL(f);
+    renderCoverThumbPreview();
   });
 
   const acceptAlbumMime = (f) => f.type.startsWith('image/') || f.type.startsWith('video/');
@@ -645,7 +716,10 @@ async function loadProfile() {
     if (rv) rv.value = profile.rentalVenues || '';
     document.getElementById('identity-number').value = profile.identityNumber || '';
     document.getElementById('skills').value = profile.skills || '';
-    document.getElementById('online-toggle').checked = !!(profile.onlineStatus ?? profile.online);
+    const onlineToggle = document.getElementById('online-toggle');
+    if (onlineToggle) {
+      onlineToggle.checked = !!(profile.onlineStatus ?? profile.online);
+    }
     const statusEl = document.getElementById('companion-status');
     if (statusEl) {
       statusEl.className = `badge ${statusBadgeClass(profile.status)}`;
@@ -653,18 +727,23 @@ async function loadProfile() {
     }
     revokeBlobUrl(companionProfileUploadState.identityPreviewUrl);
     revokeBlobUrl(companionProfileUploadState.portraitPreviewUrl);
+    revokeBlobUrl(companionProfileUploadState.coverPreviewUrl);
     companionProfileUploadState.albumPreviewUrls.forEach((u) => revokeBlobUrl(u));
     companionProfileUploadState.identityFile = null;
     companionProfileUploadState.portraitFile = null;
+    companionProfileUploadState.coverFile = null;
     companionProfileUploadState.albumFiles = [];
     companionProfileUploadState.identityPreviewUrl = null;
     companionProfileUploadState.portraitPreviewUrl = null;
+    companionProfileUploadState.coverPreviewUrl = null;
     companionProfileUploadState.albumPreviewUrls = [];
     const idIn = document.getElementById('identity-image-file');
     const prIn = document.getElementById('portrait-image-file');
+    const cvIn = document.getElementById('cover-image-file');
     const alIn = document.getElementById('intro-media-files');
     if (idIn) idIn.value = '';
     if (prIn) prIn.value = '';
+    if (cvIn) cvIn.value = '';
     if (alIn) alIn.value = '';
     applyProfileMediaFromServer(profile);
     refreshProfileLucideIcons();
@@ -687,6 +766,7 @@ async function loadProfile() {
 
 async function saveProfile(e) {
   e.preventDefault();
+  const onlineToggle = document.getElementById('online-toggle');
   const payload = {
     bio: document.getElementById('bio').value.trim(),
     hobbies: document.getElementById('hobbies').value.trim(),
@@ -695,8 +775,10 @@ async function saveProfile(e) {
     serviceType: document.getElementById('service-type').value.trim(),
     area: document.getElementById('area').value.trim(),
     rentalVenues: (document.getElementById('rental-venues')?.value || '').trim(),
-    onlineStatus: String(document.getElementById('online-toggle').checked),
   };
+  if (onlineToggle) {
+    payload.onlineStatus = String(onlineToggle.checked);
+  }
   try {
     await sendJson('/api/companions/me/profile', 'PUT', payload);
 
@@ -709,6 +791,9 @@ async function saveProfile(e) {
     }
     if (st.portraitFile) {
       fd.append('avatar', st.portraitFile, st.portraitFile.name);
+    }
+    if (st.coverFile) {
+      fd.append('cover', st.coverFile, st.coverFile.name);
     }
     st.albumFiles.forEach((file) => {
       fd.append('introMedia', file, file.name);
@@ -724,6 +809,7 @@ async function saveProfile(e) {
       const c = identityJson.companion;
       st.serverIdentityUrl = c.identityImageUrl || st.serverIdentityUrl;
       st.serverPortraitUrl = c.portraitImageUrl || c.avatarUrl || st.serverPortraitUrl;
+      st.serverCoverUrl = c.coverImageUrl || st.serverCoverUrl;
       if (c.introMediaUrls != null) {
         st.retainedIntroUrls = splitIntroMediaUrlString(c.introMediaUrls);
       }
@@ -731,21 +817,27 @@ async function saveProfile(e) {
 
     revokeBlobUrl(st.identityPreviewUrl);
     revokeBlobUrl(st.portraitPreviewUrl);
+    revokeBlobUrl(st.coverPreviewUrl);
     st.albumPreviewUrls.forEach((u) => revokeBlobUrl(u));
     st.identityFile = null;
     st.portraitFile = null;
+    st.coverFile = null;
     st.albumFiles = [];
     st.identityPreviewUrl = null;
     st.portraitPreviewUrl = null;
+    st.coverPreviewUrl = null;
     st.albumPreviewUrls = [];
     const idIn = document.getElementById('identity-image-file');
     const prIn = document.getElementById('portrait-image-file');
+    const cvIn = document.getElementById('cover-image-file');
     const alIn = document.getElementById('intro-media-files');
     if (idIn) idIn.value = '';
     if (prIn) prIn.value = '';
+    if (cvIn) cvIn.value = '';
     if (alIn) alIn.value = '';
     renderIdentityThumbPreview();
     renderPortraitThumbPreview();
+    renderCoverThumbPreview();
     renderIntroAlbumPreview();
 
     showAlert('Đã cập nhật hồ sơ companion.');
@@ -756,10 +848,33 @@ async function saveProfile(e) {
 }
 
 async function updateOnlineStatus() {
+  const onlineToggle = document.getElementById('online-toggle');
+  if (!onlineToggle) return;
   await sendJson('/api/companions/me/online', 'PATCH', {
-    online: document.getElementById('online-toggle').checked,
+    online: onlineToggle.checked,
   });
   showAlert('Đã cập nhật trạng thái online.');
+}
+
+async function loadOnlineState() {
+  const onlineToggle = document.getElementById('online-toggle');
+  const badge = document.getElementById('online-state-badge');
+  const hint = document.getElementById('online-state-hint');
+  if (!onlineToggle && !badge && !hint) return;
+  try {
+    const profile = await getJson('/api/companions/me/profile');
+    const isOnline = Boolean(profile?.onlineStatus ?? profile?.online);
+    if (onlineToggle) onlineToggle.checked = isOnline;
+    if (badge) {
+      badge.className = `badge ${isOnline ? 'text-bg-success' : 'text-bg-secondary'}`;
+      badge.textContent = isOnline ? 'ONLINE' : 'OFFLINE';
+    }
+    if (hint) {
+      hint.textContent = isOnline ? 'Bạn đang sẵn sàng nhận booking mới.' : 'Bạn đang tạm ẩn. Bật Online để nhận booking.';
+    }
+  } catch (err) {
+    if (hint) hint.textContent = 'Không thể tải trạng thái online.';
+  }
 }
 
 async function loadAvailabilities() {
@@ -790,7 +905,7 @@ async function loadAvailabilities() {
         start,
         end,
         status: b.status,
-        customerName: b.customer?.fullName || b.customer?.username || `User #${b.customer?.id || '-'}`,
+        customerName: b.customer?.fullName || b.customer?.username || 'Khách hàng',
         location: b.location || '-',
       };
     })
@@ -814,7 +929,7 @@ async function loadAvailabilities() {
             <td>${escapeHtml(fmtDateTime(slot.start))}</td>
             <td>${escapeHtml(fmtDateTime(slot.end))}</td>
             <td><span class="badge ${statusClass}">${escapeHtml(slot.status)}</span></td>
-            <td>Booking #${slot.id} - ${escapeHtml(slot.customerName)} (${escapeHtml(slot.location)})</td>`;
+            <td>${escapeHtml(slot.customerName)} (${escapeHtml(slot.location)})</td>`;
     rows.appendChild(tr);
   });
 }
@@ -829,7 +944,7 @@ async function updateBookingStatus(bookingId, status) {
   await loadBookings();
   await loadBookingWorkflow();
   await loadIncomeStats();
-  showAlert(`Đã cập nhật booking #${bookingId} -> ${status}.`);
+  showAlert(`Đã cập nhật trạng thái -> ${status}.`);
 }
 
 async function checkInBooking(bookingId) {
@@ -837,7 +952,7 @@ async function checkInBooking(bookingId) {
     await sendJson(`/api/bookings/me/${bookingId}/check-in`, 'PATCH', {});
     await loadBookings();
     await loadBookingWorkflow();
-    showAlert(`Đã check-in booking #${bookingId}. Phiên đã bắt đầu.`);
+    showAlert('Đã check-in. Phiên đã bắt đầu.');
   } catch (err) {
     showAlert(err.message || 'Check-in thất bại', 'danger');
   }
@@ -849,7 +964,7 @@ async function checkOutBooking(bookingId) {
     await loadBookings();
     await loadBookingWorkflow();
     await loadIncomeStats();
-    showAlert(`Đã check-out booking #${bookingId}. Đơn đã hoàn tất.`);
+    showAlert('Đã check-out. Đơn đã hoàn tất.');
   } catch (err) {
     showAlert(err.message || 'Check-out thất bại', 'danger');
   }
@@ -869,7 +984,7 @@ async function sendSos(bookingId) {
   const modal = modalEl ? bootstrap.Modal.getInstance(modalEl) : null;
   modal?.hide();
   if (noteInput) noteInput.value = '';
-  showAlert(`Đã gửi SOS cho booking #${bookingId}.`, 'warning');
+  showAlert('Đã gửi SOS.', 'warning');
 }
 
 function ensureSosModal() {
@@ -914,10 +1029,10 @@ function openSosModal(booking) {
   const noteInput = modalEl.querySelector('#sos-note-input');
   if (noteInput) {
     const customer =
-      booking?.customer?.fullName || booking?.customer?.username || `User #${booking?.customer?.id || '-'}`;
+      booking?.customer?.fullName || booking?.customer?.username || 'Khách hàng';
     const bookingTime = fmtDateTime(booking?.bookingTime);
     const location = booking?.location || '-';
-    noteInput.value = `SOS khẩn cấp tại booking #${bookingId}. Khách hàng: ${customer}. Thời gian: ${bookingTime}. Địa điểm: ${location}.`;
+    noteInput.value = `SOS khẩn cấp. Khách hàng: ${customer}. Thời gian: ${bookingTime}. Địa điểm: ${location}.`;
   }
   const confirmBtn = modalEl.querySelector('#confirm-sos-btn');
   if (confirmBtn) {
@@ -1006,7 +1121,7 @@ async function loadBookings() {
   }
 
   if (!bookings.length) {
-    rows.innerHTML = '<tr><td colspan="6" class="text-muted">Chưa có booking.</td></tr>';
+    rows.innerHTML = '<tr><td colspan="7" class="text-muted">Chưa có booking.</td></tr>';
     return;
   }
   bookings.forEach((item) => {
@@ -1015,16 +1130,31 @@ async function loadBookings() {
     const canCheckIn = item.status === 'ACCEPTED';
     const canCheckOut = item.status === 'IN_PROGRESS';
     const canSos = item.status === 'ACCEPTED' || item.status === 'IN_PROGRESS';
-    const canChat = item.status === 'ACCEPTED' || item.status === 'IN_PROGRESS' || item.status === 'COMPLETED';
     const hasPendingExt = item.pendingExtensionMinutes != null;
     const extLine = hasPendingExt
       ? `<div class="small text-warning mb-1">Khách xin gia hạn +${item.pendingExtensionMinutes} phút</div>`
       : '';
+
+    const gross = item?.pricing?.grossAmount ?? item?.holdAmount ?? 0;
+    const commission = item?.pricing?.commissionAmount ?? 0;
+    const net = item?.pricing?.netAmount ?? 0;
+    const payout = item?.pricing?.payout || null;
+    const payoutLine = payout?.id
+      ? `<div class="small text-success mt-1"><i class="bi bi-check-circle me-1"></i>Đã cộng ví ${escapeHtml(fmtDateTime(payout.createdAt))}</div>`
+      : item.status === 'COMPLETED'
+        ? `<div class="small text-muted mt-1"><i class="bi bi-hourglass-split me-1"></i>Chưa thấy giao dịch cộng ví</div>`
+        : '';
+
     tr.innerHTML = `
             <td>${item.id}</td>
             <td>${escapeHtml(item.customer?.fullName || item.customer?.username || '')}</td>
             <td>${escapeHtml(fmtDateTime(item.bookingTime))}</td>
             <td>${item.duration} phút${extLine}</td>
+            <td>
+              <div class="fw-semibold">${escapeHtml(fmtMoneyVnd(gross))}</div>
+              <div class="small text-muted">Phí: ${escapeHtml(fmtMoneyVnd(commission))} • Nhận: <span class="text-success fw-semibold">${escapeHtml(fmtMoneyVnd(net))}</span></div>
+              ${payoutLine}
+            </td>
             <td><span class="badge text-bg-secondary">${escapeHtml(item.status)}</span></td>
             <td class="text-end">
                 ${
@@ -1041,7 +1171,6 @@ async function loadBookings() {
                 }
                 ${canCheckIn ? `<button class="btn btn-sm btn-outline-primary me-2" data-action="checkin">Check-in</button>` : ''}
                 ${canCheckOut ? `<button class="btn btn-sm btn-outline-success me-2" data-action="checkout">Check-out</button>` : ''}
-                ${canChat ? `<a class="btn btn-sm btn-outline-dark me-2" href="../companion/chat.html?bookingId=${item.id}">Chat/Call</a>` : ''}
                 ${canSos ? `<button class="btn btn-sm btn-danger" data-action="sos"><i class="bi bi-exclamation-octagon me-1"></i>SOS</button>` : ''}
             </td>`;
     if (canProcess) {
@@ -1137,6 +1266,31 @@ async function loadIncomeStats() {
   setTextIfEl('stat-hold', Number(stats.holdAmount || 0).toLocaleString('vi-VN'));
   setTextIfEl('stat-accepted', String(stats.acceptedBookings ?? 0));
   setTextIfEl('stat-completed', String(stats.completedBookings ?? 0));
+}
+
+async function loadWalletTransactions() {
+  const body = document.getElementById('wallet-tx-body');
+  if (!body) return;
+  const data = await getJson('/api/wallet/me');
+  const txs = Array.isArray(data?.transactions) ? data.transactions : [];
+  body.innerHTML = '';
+  if (!txs.length) {
+    body.innerHTML = '<tr><td colspan="5" class="text-muted">Chưa có giao dịch.</td></tr>';
+    return;
+  }
+  txs.forEach((t) => {
+    const tr = document.createElement('tr');
+    const amt = Number(t.amount || 0);
+    const cls = amt < 0 ? 'text-danger' : 'text-success';
+    tr.innerHTML = `
+      <td>${escapeHtml(fmtDateTime(t.createdAt))}</td>
+      <td>${escapeHtml(t.type || '-')}</td>
+      <td>${escapeHtml(t.provider || '-')}</td>
+      <td class="text-muted small">${escapeHtml(t.description || '-')}</td>
+      <td class="text-end fw-semibold ${cls}">${amt.toLocaleString('vi-VN')} VND</td>
+    `;
+    body.appendChild(tr);
+  });
 }
 
 async function loadServicePrices() {
@@ -1324,6 +1478,19 @@ async function bootstrap() {
         await RealtimeStomp.ensureLibs();
         await RealtimeStomp.connect();
         await RealtimeStomp.subscribeNotifications(Number(auth.userId), (n) => {
+          // Nếu admin khóa tài khoản trong lúc đang online → logout ngay.
+          const title = String(n?.title || '').toLowerCase();
+          const content = String(n?.content || '').toLowerCase();
+          if (title.includes('tài khoản bị khóa') || content.includes('tài khoản của bạn đã bị khóa')) {
+            try {
+              localStorage.removeItem('token');
+              localStorage.removeItem('role');
+              localStorage.removeItem('userId');
+            } finally {
+              window.location.href = '../user/login.html';
+            }
+            return;
+          }
           const id = String(n.id);
           if (!companionRealtimeNotifState.seenIds.has(id)) {
             companionRealtimeNotifState.seenIds.add(id);
@@ -1331,6 +1498,10 @@ async function bootstrap() {
           }
           pollCompanionRealtimeNotifications();
         });
+        // Dự phòng: vẫn poll định kỳ để không phụ thuộc 100% vào socket (tránh miss event do mạng/proxy).
+        if (!companionRealtimeNotifState.timer) {
+          companionRealtimeNotifState.timer = setInterval(pollCompanionRealtimeNotifications, 5000);
+        }
       } catch (e) {
         console.warn('WebSocket thông báo không khả dụng, dùng polling', e);
         if (!companionRealtimeNotifState.timer) {
@@ -1375,6 +1546,7 @@ async function bootstrap() {
       onlineToggle.addEventListener('change', async () => {
         try {
           await updateOnlineStatus();
+          await loadOnlineState();
         } catch (err) {
           showAlert(`Không thể cập nhật online: ${err.message}`, 'danger');
         }
@@ -1421,6 +1593,9 @@ async function bootstrap() {
       initCompanionProfileUploads();
       tasks.push(loadProfile());
     }
+    if (onlineToggle) {
+      tasks.push(loadOnlineState());
+    }
     if (page === 'companion-operations') {
       tasks.push(loadAvailabilities(), loadServicePrices());
     }
@@ -1428,7 +1603,7 @@ async function bootstrap() {
       tasks.push(loadBookings(), loadBookingWorkflow(), loadConsultations());
     }
     if (page === 'companion-finance') {
-      tasks.push(loadIncomeStats(), loadWithdrawals(), loadBankAccount());
+      tasks.push(loadIncomeStats(), loadWithdrawals(), loadBankAccount(), loadWalletTransactions());
     }
     if (page === 'companion-notifications') {
       tasks.push(loadCompanionNotifications());

@@ -3,6 +3,8 @@ import Booking from '../models/booking.model.js';
 import Companion from '../models/companion.model.js';
 import User from '../models/user.model.js';
 import WalletTransaction from '../models/walletTransaction.model.js';
+import ServicePrice from '../models/servicePrice.model.js';
+import PlatformSettings from '../models/platformSettings.model.js';
 import * as bookingNotify from './bookingNotify.service.js';
 import {
   bigIntToDecimal128,
@@ -17,6 +19,14 @@ function isTxnUnsupported(err) {
     msg.includes('replica set') ||
     msg.includes('mongos')
   );
+}
+
+async function getOrCreateSettings() {
+  let s = await PlatformSettings.findOne();
+  if (!s) {
+    s = await PlatformSettings.create({});
+  }
+  return s;
 }
 
 export function serializeBooking(doc) {
@@ -68,7 +78,20 @@ export async function createBooking(customerUserId, payload) {
     }
 
     let priceDec = companion.pricePerHour;
-    if (payload.servicePricePerHour != null) {
+    let serviceName = payload.serviceName || undefined;
+
+    // Ưu tiên servicePriceId (UI mới)
+    if (payload.servicePriceId) {
+      const sp = await ServicePrice.findOne({ _id: payload.servicePriceId, companion: companion._id }).lean();
+      if (!sp) {
+        const err = new Error('Không tìm thấy dịch vụ đã chọn.');
+        err.status = 400;
+        throw err;
+      }
+      priceDec = sp.pricePerHour;
+      serviceName = sp.serviceName || serviceName;
+    } else if (payload.servicePricePerHour != null) {
+      // Tương thích ngược
       priceDec = bigIntToDecimal128(BigInt(Math.floor(payload.servicePricePerHour)));
     }
 
@@ -105,7 +128,7 @@ export async function createBooking(customerUserId, payload) {
       duration: payload.duration,
       location: payload.location || undefined,
       rentalVenue: payload.rentalVenue || undefined,
-      serviceName: payload.serviceName || undefined,
+      serviceName,
       servicePricePerHour: priceDec,
       note: payload.note || undefined,
       holdAmount: bigIntToDecimal128(holdBig),
@@ -139,7 +162,19 @@ export async function createBooking(customerUserId, payload) {
     }
 
     let priceDec = companion.pricePerHour;
-    if (payload.servicePricePerHour != null) {
+    let serviceName = payload.serviceName || undefined;
+    if (payload.servicePriceId) {
+      const sp = await ServicePrice.findOne({ _id: payload.servicePriceId, companion: companion._id })
+        .session(session)
+        .lean();
+      if (!sp) {
+        const err = new Error('Không tìm thấy dịch vụ đã chọn.');
+        err.status = 400;
+        throw err;
+      }
+      priceDec = sp.pricePerHour;
+      serviceName = sp.serviceName || serviceName;
+    } else if (payload.servicePricePerHour != null) {
       priceDec = bigIntToDecimal128(BigInt(Math.floor(payload.servicePricePerHour)));
     }
 
@@ -178,7 +213,7 @@ export async function createBooking(customerUserId, payload) {
           duration: payload.duration,
           location: payload.location || undefined,
           rentalVenue: payload.rentalVenue || undefined,
-          serviceName: payload.serviceName || undefined,
+          serviceName,
           servicePricePerHour: priceDec,
           note: payload.note || undefined,
           holdAmount: bigIntToDecimal128(holdBig),
@@ -432,6 +467,40 @@ export async function checkOutBooking(userId, role, bookingId) {
   booking.status = 'COMPLETED';
   booking.completedAt = now;
   await booking.save();
+
+  // Quyết toán: cộng tiền vào ví companion để rút (net = hold - commission)
+  try {
+    const settings = await getOrCreateSettings();
+    const rate = settings.commissionRate ?? 0.15;
+    const gross = decimal128ToBigInt(booking.holdAmount);
+    const commission = BigInt(Math.max(0, Math.round(Number(gross) * rate)));
+    const net = gross > commission ? gross - commission : 0n;
+
+    if (net > 0n) {
+      const companion = await Companion.findById(booking.companion).select('user').lean();
+      const companionUserId = companion?.user;
+      if (companionUserId) {
+        const cu = await User.findById(companionUserId);
+        if (cu) {
+          const bal = decimal128ToBigInt(cu.balance);
+          cu.balance = bigIntToDecimal128(bal + net);
+          await cu.save();
+        }
+        await WalletTransaction.create({
+          user: companionUserId,
+          booking: booking._id,
+          amount: bigIntToDecimal128(net),
+          type: 'PAYOUT',
+          provider: 'BOOKING',
+          description: `Thanh toán booking #${String(booking._id)} (sau hoa hồng)`,
+        });
+      }
+    }
+  } catch (e) {
+    // Dev-friendly: nếu payout lỗi, vẫn giữ booking COMPLETED; admin có thể đối soát thủ công.
+    console.warn('[settlement] payout failed', e?.message || e);
+  }
+
   void bookingNotify.notifyCheckOutConfirmed(booking);
   return { step: 'CONFIRMED', booking: serializeBooking(booking) };
 }
@@ -451,8 +520,24 @@ export async function cancelBooking(userId, role, bookingId) {
   booking.status = 'CANCELLED';
   await booking.save();
 
-  // hoàn cọc (tối giản): cộng lại vào ví khách + ghi REFUND
-  const refund = decimal128ToBigInt(booking.holdAmount);
+  // Chính sách hủy/hoàn:
+  // - Trước 24h: hoàn 100% cọc
+  // - Từ 6h–24h: hoàn 50% cọc
+  // - Dưới 6h: không hoàn
+  const hold = decimal128ToBigInt(booking.holdAmount);
+  let refund = 0n;
+  try {
+    const bt = booking.bookingTime ? new Date(booking.bookingTime).getTime() : NaN;
+    const diffMs = bt - Date.now();
+    const h24 = 24 * 60 * 60 * 1000;
+    const h6 = 6 * 60 * 60 * 1000;
+    if (Number.isFinite(diffMs) && diffMs >= h24) refund = hold;
+    else if (Number.isFinite(diffMs) && diffMs >= h6) refund = hold / 2n;
+    else refund = 0n;
+  } catch {
+    refund = 0n;
+  }
+
   if (refund > 0n) {
     const customer = await User.findById(booking.customer);
     if (customer) {
@@ -465,10 +550,16 @@ export async function cancelBooking(userId, role, bookingId) {
       booking: booking._id,
       amount: bigIntToDecimal128(refund),
       type: 'REFUND',
-      description: 'Hoàn cọc — khách hủy đơn',
+      description:
+        refund === hold
+          ? 'Hoàn cọc 100% — hủy trước 24h'
+          : 'Hoàn cọc 50% — hủy trong 6–24h trước giờ hẹn',
     });
   }
-  return serializeBooking(booking);
+  const out = serializeBooking(booking);
+  out.refundAmount = refund.toString();
+  out.refundPolicy = refund === hold ? 'FULL_24H' : refund > 0n ? 'HALF_6_24H' : 'NO_REFUND_LT_6H';
+  return out;
 }
 
 export async function requestBookingExtension(customerUserId, bookingId, extraMinutes) {
@@ -538,6 +629,39 @@ export async function companionDecideExtension(companionUserId, bookingId, decis
   const pending = Number(booking.pendingExtensionMinutes || 0);
   booking.pendingExtensionMinutes = undefined;
   if (decision === 'ACCEPT') {
+    // Tính thêm tiền gia hạn và giữ cọc bổ sung từ ví khách.
+    // extraHold = ceil(extraMinutes * pricePerHour / 60)
+    const extraHold = computeHoldAmountVnd(pending, booking.servicePricePerHour);
+    if (extraHold > 0n) {
+      const customer = await User.findById(booking.customer);
+      if (!customer) {
+        const err = new Error('Không tìm thấy khách hàng để giữ cọc gia hạn.');
+        err.status = 500;
+        throw err;
+      }
+      const bal = decimal128ToBigInt(customer.balance);
+      if (bal < extraHold) {
+        const err = new Error('Số dư ví khách hàng không đủ để giữ cọc gia hạn.');
+        err.status = 400;
+        err.code = 'INSUFFICIENT_BALANCE_EXTENSION';
+        throw err;
+      }
+      customer.balance = bigIntToDecimal128(bal - extraHold);
+      await customer.save();
+
+      const currentHold = decimal128ToBigInt(booking.holdAmount);
+      booking.holdAmount = bigIntToDecimal128(currentHold + extraHold);
+
+      await WalletTransaction.create({
+        user: booking.customer,
+        booking: booking._id,
+        amount: bigIntToDecimal128(extraHold),
+        type: 'HOLD',
+        provider: 'EXTENSION',
+        description: `Giữ cọc gia hạn +${pending} phút cho booking #${String(booking._id)}`,
+      });
+    }
+
     const used = Number(booking.extensionMinutesApproved || 0);
     booking.extensionMinutesApproved = used + pending;
     booking.duration = Number(booking.duration || 0) + pending;

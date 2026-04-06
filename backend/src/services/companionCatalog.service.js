@@ -121,6 +121,7 @@ function toPublicCompanionJson(doc, extras = {}) {
     pricePerHour: c.pricePerHour != null && c.pricePerHour.toString ? c.pricePerHour.toString() : c.pricePerHour,
     avatarUrl: c.avatarUrl,
     portraitImageUrl: c.portraitImageUrl,
+    coverImageUrl: c.coverImageUrl,
     introVideoUrl: c.introVideoUrl,
     introMediaUrls: c.introMediaUrls,
     skills: c.skills,
