@@ -27,7 +27,10 @@ export const pendingCompanions = async (req, res) => {
 
 export const approveCompanion = async (req, res) => {
   try {
-    await adminActions.setCompanionStatus(req.params.id, 'APPROVED');
+    await adminActions.setCompanionStatus(req.params.id, 'APPROVED', {
+      reason: req.body?.reason,
+      adminUserId: req.auth.userId,
+    });
     res.json({ ok: true });
   } catch (err) {
     handleError(res, err);
@@ -36,7 +39,10 @@ export const approveCompanion = async (req, res) => {
 
 export const rejectCompanion = async (req, res) => {
   try {
-    await adminActions.setCompanionStatus(req.params.id, 'REJECTED');
+    await adminActions.setCompanionStatus(req.params.id, 'REJECTED', {
+      reason: req.body?.reason,
+      adminUserId: req.auth.userId,
+    });
     res.json({ ok: true });
   } catch (err) {
     handleError(res, err);
@@ -81,7 +87,10 @@ export const usersList = async (req, res) => {
 
 export const userBan = async (req, res) => {
   try {
-    await adminActions.banUser(req.params.userId);
+    await adminActions.banUser(req.params.userId, {
+      reason: req.body?.reason,
+      adminUserId: req.auth.userId,
+    });
     res.json({ ok: true });
   } catch (err) {
     handleError(res, err);
@@ -90,7 +99,10 @@ export const userBan = async (req, res) => {
 
 export const userWarn = async (req, res) => {
   try {
-    await adminActions.warnUser(req.params.userId);
+    await adminActions.warnUser(req.params.userId, {
+      reason: req.body?.reason,
+      adminUserId: req.auth.userId,
+    });
     res.json({ ok: true });
   } catch (err) {
     handleError(res, err);
@@ -99,7 +111,10 @@ export const userWarn = async (req, res) => {
 
 export const userResetStatus = async (req, res) => {
   try {
-    await adminActions.resetUserStatus(req.params.userId);
+    await adminActions.resetUserStatus(req.params.userId, {
+      reason: req.body?.reason,
+      adminUserId: req.auth.userId,
+    });
     res.json({ ok: true });
   } catch (err) {
     handleError(res, err);
@@ -117,7 +132,10 @@ export const moderationReviews = async (req, res) => {
 
 export const moderationReviewHide = async (req, res) => {
   try {
-    await adminActions.hideReviewById(req.params.reviewId);
+    await adminActions.hideReviewById(req.params.reviewId, {
+      reason: req.body?.reason,
+      adminUserId: req.auth.userId,
+    });
     res.json({ ok: true });
   } catch (err) {
     handleError(res, err);
@@ -145,7 +163,10 @@ export const commissionRate = async (req, res) => {
 
 export const withdrawalApprove = async (req, res) => {
   try {
-    await adminActions.approveWithdrawal(req.params.id);
+    await adminActions.approveWithdrawal(req.params.id, {
+      reason: req.body?.reason,
+      adminUserId: req.auth.userId,
+    });
     res.json({ ok: true });
   } catch (err) {
     handleError(res, err);
@@ -154,7 +175,10 @@ export const withdrawalApprove = async (req, res) => {
 
 export const withdrawalReject = async (req, res) => {
   try {
-    await adminActions.rejectWithdrawal(req.params.id);
+    await adminActions.rejectWithdrawal(req.params.id, {
+      reason: req.body?.reason,
+      adminUserId: req.auth.userId,
+    });
     res.json({ ok: true });
   } catch (err) {
     handleError(res, err);
@@ -172,7 +196,11 @@ export const disputesList = async (req, res) => {
 
 export const disputeAction = async (req, res) => {
   try {
-    await adminActions.resolveReportAction(req.params.id);
+    await adminActions.resolveReportAction(req.params.id, {
+      action: req.actionType,
+      reason: req.body?.reason,
+      adminUserId: req.auth.userId,
+    });
     res.json({ ok: true });
   } catch (err) {
     handleError(res, err);

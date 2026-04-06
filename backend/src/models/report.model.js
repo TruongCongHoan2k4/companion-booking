@@ -39,6 +39,25 @@ const reportSchema = new mongoose.Schema(
       enum: ['PENDING', 'RESOLVED'],
       default: 'PENDING',
     },
+    resolutionAction: {
+      type: String,
+      enum: ['FREEZE_ESCROW', 'REFUND', 'PAYOUT', 'CLOSE'],
+    },
+    resolutionNote: {
+      type: String,
+      maxlength: 1000,
+    },
+    resolvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    resolvedAt: {
+      type: Date,
+    },
+    lastActionAt: {
+      type: Date,
+      default: Date.now,
+    },
   },
   {
     timestamps: { createdAt: true, updatedAt: false }, // chỉ tạo createdAt giống LocalDateTime.now()

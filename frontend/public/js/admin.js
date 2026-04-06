@@ -76,12 +76,9 @@ async function ensureAdminAccess() {
       return false;
     }
     return true;
-  } catch (_) {
-    const auth = readAuthEvidence();
-    const hasAdminSignal = auth.role === 'ADMIN' && (auth.hasUserId || auth.hasToken || auth.hasSessionCookie);
-    if (hasAdminSignal) {
-      return true;
-    }
+  } catch (_err) {
+    // Fallback local role không đủ tin cậy cho trang admin.
+    void readAuthEvidence();
     window.location.href = '../user/login.html';
     return false;
   }
@@ -150,9 +147,14 @@ function wireAdminSearch(runSearch) {
   if (!input || !btn) {
     return;
   }
+  let timer = null;
   const go = () => {
     clearAlert();
     runSearch();
+  };
+  const goDebounced = () => {
+    clearTimeout(timer);
+    timer = setTimeout(go, 280);
   };
   btn.addEventListener('click', go);
   input.addEventListener('keydown', (e) => {
@@ -161,6 +163,127 @@ function wireAdminSearch(runSearch) {
       go();
     }
   });
+  input.addEventListener('input', goDebounced);
+}
+
+function ensureReasonModal() {
+  let modalEl = document.getElementById('admin-reason-modal');
+  if (modalEl) {
+    return modalEl;
+  }
+
+  modalEl = document.createElement('div');
+  modalEl.className = 'modal fade';
+  modalEl.id = 'admin-reason-modal';
+  modalEl.tabIndex = -1;
+  modalEl.setAttribute('aria-hidden', 'true');
+  modalEl.innerHTML = `
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <form id="admin-reason-form">
+          <div class="modal-header">
+            <h5 class="modal-title" id="admin-reason-title">Nhập lý do</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-2 small text-muted" id="admin-reason-hint"></div>
+            <textarea class="form-control" id="admin-reason-input" rows="4" placeholder="Nhập nội dung..."></textarea>
+            <div class="invalid-feedback d-block mt-2" id="admin-reason-error" style="display:none"></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+            <button type="submit" class="btn btn-primary" id="admin-reason-submit">Xác nhận</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modalEl);
+  return modalEl;
+}
+
+function askReasonModal({ title, hint, placeholder, minLength = 8, required = true, submitText = 'Xác nhận' }) {
+  if (typeof bootstrap === 'undefined') {
+    showAlert('Thiếu Bootstrap để mở form nhập lý do.', 'danger');
+    return Promise.resolve(null);
+  }
+
+  const modalEl = ensureReasonModal();
+  const titleEl = modalEl.querySelector('#admin-reason-title');
+  const hintEl = modalEl.querySelector('#admin-reason-hint');
+  const inputEl = modalEl.querySelector('#admin-reason-input');
+  const errorEl = modalEl.querySelector('#admin-reason-error');
+  const submitEl = modalEl.querySelector('#admin-reason-submit');
+  const formEl = modalEl.querySelector('#admin-reason-form');
+
+  titleEl.textContent = title || 'Nhập lý do';
+  hintEl.textContent = hint || (required ? `Vui lòng nhập nội dung (tối thiểu ${minLength} ký tự).` : 'Bạn có thể để trống.');
+  inputEl.value = '';
+  inputEl.placeholder = placeholder || 'Nhập nội dung...';
+  submitEl.textContent = submitText;
+  errorEl.style.display = 'none';
+  errorEl.textContent = '';
+
+  const modal = new bootstrap.Modal(modalEl, { backdrop: 'static' });
+  modal.show();
+  setTimeout(() => inputEl.focus(), 80);
+
+  return new Promise((resolve) => {
+    let done = false;
+    const cleanup = () => {
+      if (done) return;
+      done = true;
+      formEl.removeEventListener('submit', onSubmit);
+      modalEl.removeEventListener('hidden.bs.modal', onHidden);
+    };
+
+    const onHidden = () => {
+      cleanup();
+      resolve(null);
+    };
+
+    const onSubmit = (e) => {
+      e.preventDefault();
+      const trimmed = String(inputEl.value || '').trim();
+      if (!trimmed) {
+        if (required) {
+          errorEl.textContent = 'Bạn chưa nhập nội dung.';
+          errorEl.style.display = '';
+          inputEl.focus();
+          return;
+        }
+        cleanup();
+        modal.hide();
+        resolve('');
+        return;
+      }
+      if (trimmed.length < minLength) {
+        errorEl.textContent = `Nội dung tối thiểu ${minLength} ký tự.`;
+        errorEl.style.display = '';
+        inputEl.focus();
+        return;
+      }
+      cleanup();
+      modal.hide();
+      resolve(trimmed);
+    };
+
+    formEl.addEventListener('submit', onSubmit);
+    modalEl.addEventListener('hidden.bs.modal', onHidden, { once: true });
+  });
+}
+
+async function runButtonAction(button, task) {
+  if (!button) return task();
+  const oldText = button.innerHTML;
+  button.disabled = true;
+  button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang xử lý';
+  try {
+    return await task();
+  } finally {
+    button.disabled = false;
+    button.innerHTML = oldText;
+  }
 }
 
 const adminChartState = {
@@ -547,7 +670,22 @@ async function loadPendingCompanions(tableBodyId, explicitKeyword) {
 
 async function moderateCompanion(id, isApprove, tableBodyId) {
   const url = isApprove ? `/api/admin/approve-companion/${id}` : `/api/admin/reject-companion/${id}`;
-  await requestJson(url, { method: 'POST' });
+  let reason = '';
+  if (!isApprove) {
+    const r = await askReasonModal({
+      title: 'Từ chối hồ sơ Companion',
+      hint: 'Nhập lý do từ chối để Companion biết cần bổ sung gì.',
+      minLength: 10,
+      required: true,
+      submitText: 'Từ chối',
+    });
+    if (!r) return;
+    reason = r;
+  }
+  await requestJson(url, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
   showAlert(isApprove ? 'Đã cấp tích xanh cho Companion.' : 'Đã từ chối hồ sơ Companion.');
   await loadPendingCompanions(tableBodyId);
   if (document.getElementById('stat-profit')) {
@@ -609,9 +747,18 @@ async function updateUserFlag(userId, action) {
   let method = 'POST';
   let successMessage = 'Đã khóa tài khoản.';
 
+  let reason = '';
   if (action === 'warn') {
     endpoint = 'warn';
     successMessage = 'Đã cảnh cáo tài khoản.';
+    const r = await askReasonModal({
+      title: 'Cảnh cáo người dùng',
+      minLength: 8,
+      required: true,
+      submitText: 'Cảnh cáo',
+    });
+    if (!r) return;
+    reason = r;
   } else if (action === 'reset-status') {
     const confirmed = window.confirm(
       'Bạn có chắc chắn muốn khôi phục trạng thái bình thường cho người dùng này không?'
@@ -622,9 +769,29 @@ async function updateUserFlag(userId, action) {
     endpoint = 'reset-status';
     method = 'PUT';
     successMessage = 'Đã khôi phục trạng thái bình thường cho tài khoản.';
+    const r = await askReasonModal({
+      title: 'Ghi chú khôi phục trạng thái (không bắt buộc)',
+      minLength: 5,
+      required: false,
+      submitText: 'Khôi phục',
+    });
+    if (r == null) return;
+    reason = r || '';
+  } else {
+    const r = await askReasonModal({
+      title: 'Khóa tài khoản người dùng',
+      minLength: 8,
+      required: true,
+      submitText: 'Khóa',
+    });
+    if (!r) return;
+    reason = r;
   }
 
-  await requestJson(`/api/admin/users/${userId}/${endpoint}`, { method });
+  await requestJson(`/api/admin/users/${userId}/${endpoint}`, {
+    method,
+    body: JSON.stringify({ reason }),
+  });
   showAlert(successMessage);
   await loadUsersPage();
 }
@@ -658,14 +825,26 @@ async function loadModerationPage(keyword) {
   });
 
   reviewsBody.querySelectorAll('button[data-id]').forEach((btn) => {
-    btn.addEventListener('click', () => hideReview(btn.dataset.id));
+    btn.addEventListener('click', () => hideReview(btn.dataset.id, btn));
   });
 }
 
-async function hideReview(reviewId) {
-  await requestJson(`/api/admin/moderation/reviews/${reviewId}/hide`, { method: 'POST' });
-  showAlert('Đã ẩn review vi phạm.');
-  await loadModerationPage();
+async function hideReview(reviewId, button) {
+  const reason = await askReasonModal({
+    title: 'Ẩn review vi phạm',
+    minLength: 8,
+    required: true,
+    submitText: 'Ẩn review',
+  });
+  if (!reason) return;
+  await runButtonAction(button, async () => {
+    await requestJson(`/api/admin/moderation/reviews/${reviewId}/hide`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+    showAlert('Đã ẩn review vi phạm.');
+    await loadModerationPage();
+  });
 }
 
 async function loadTransactionsPage(keyword) {
@@ -706,20 +885,42 @@ async function loadTransactionsPage(keyword) {
   });
 
   tbody.querySelectorAll('button[data-action="approve"]').forEach((btn) => {
-    btn.addEventListener('click', () => reviewWithdrawal(btn.dataset.id, true));
+    btn.addEventListener('click', () => reviewWithdrawal(btn.dataset.id, true, btn));
   });
   tbody.querySelectorAll('button[data-action="reject"]').forEach((btn) => {
-    btn.addEventListener('click', () => reviewWithdrawal(btn.dataset.id, false));
+    btn.addEventListener('click', () => reviewWithdrawal(btn.dataset.id, false, btn));
   });
 }
 
-async function reviewWithdrawal(id, approve) {
+async function reviewWithdrawal(id, approve, button) {
   const url = approve
     ? `/api/admin/transactions/withdrawals/${id}/approve`
     : `/api/admin/transactions/withdrawals/${id}/reject`;
-  await requestJson(url, { method: 'POST' });
-  showAlert(approve ? 'Đã duyệt lệnh rút tiền.' : 'Đã từ chối lệnh rút tiền.');
-  await loadTransactionsPage();
+  let reason = '';
+  if (approve) {
+    const r = await askReasonModal({
+      title: 'Ghi chú duyệt lệnh rút (không bắt buộc)',
+      minLength: 5,
+      required: false,
+      submitText: 'Duyệt',
+    });
+    if (r == null) return;
+    reason = r || '';
+  } else {
+    const r = await askReasonModal({
+      title: 'Từ chối lệnh rút tiền',
+      minLength: 8,
+      required: true,
+      submitText: 'Từ chối',
+    });
+    if (!r) return;
+    reason = r;
+  }
+  await runButtonAction(button, async () => {
+    await requestJson(url, { method: 'POST', body: JSON.stringify({ reason }) });
+    showAlert(approve ? 'Đã duyệt lệnh rút tiền.' : 'Đã từ chối lệnh rút tiền.');
+    await loadTransactionsPage();
+  });
 }
 
 async function saveCommissionRate(event) {
@@ -745,17 +946,22 @@ async function loadDisputesPage() {
 
   disputes.forEach((dispute) => {
     const tr = document.createElement('tr');
+    const canAct = dispute.status !== 'RESOLVED';
     tr.innerHTML = `
             <td>${dispute.id}</td>
             <td>${escapeHtml(dispute.reporter || '')}</td>
             <td>${escapeHtml(dispute.reportedUser || '')}</td>
-            <td>${escapeHtml(dispute.reason || '')}</td>
-            <td><span class="badge ${dispute.status === 'RESOLVED' ? 'text-bg-success' : 'text-bg-warning'}">${escapeHtml(dispute.status)}</span></td>
+            <td>
+              <div class="fw-semibold">${escapeHtml(dispute.reason || '')}</div>
+              <div class="small text-muted mt-1">Loại: ${escapeHtml(dispute.category || 'N/A')} ${dispute.emergency ? '• SOS' : ''}</div>
+              ${dispute.resolutionNote ? `<div class="small text-muted mt-1">Biên bản: ${escapeHtml(dispute.resolutionNote)}</div>` : ''}
+            </td>
+            <td><span class="badge ${dispute.status === 'RESOLVED' ? 'text-bg-success' : dispute.emergency ? 'text-bg-danger' : 'text-bg-warning'}">${escapeHtml(dispute.status)}</span></td>
             <td class="action-group">
-                <button type="button" class="btn btn-sm btn-secondary" data-action="freeze" data-report-id="${dispute.id}">Đóng băng ký quỹ</button>
-                <button type="button" class="btn btn-sm btn-outline-primary" data-action="refund" data-report-id="${dispute.id}">Hoàn tiền</button>
-                <button type="button" class="btn btn-sm btn-outline-success" data-action="payout" data-report-id="${dispute.id}">Thanh toán</button>
-                <button type="button" class="btn btn-sm btn-dark" data-action="close" data-report-id="${dispute.id}">Đóng hồ sơ</button>
+                <button type="button" class="btn btn-sm btn-secondary" data-action="freeze" data-report-id="${dispute.id}" ${canAct ? '' : 'disabled'}>Đóng băng ký quỹ</button>
+                <button type="button" class="btn btn-sm btn-outline-primary" data-action="refund" data-report-id="${dispute.id}" ${canAct ? '' : 'disabled'}>Hoàn tiền</button>
+                <button type="button" class="btn btn-sm btn-outline-success" data-action="payout" data-report-id="${dispute.id}" ${canAct ? '' : 'disabled'}>Thanh toán</button>
+                <button type="button" class="btn btn-sm btn-dark" data-action="close" data-report-id="${dispute.id}" ${canAct ? '' : 'disabled'}>Đóng hồ sơ</button>
             </td>
         `;
     tbody.appendChild(tr);
@@ -765,12 +971,12 @@ async function loadDisputesPage() {
     btn.addEventListener('click', () => {
       const reportId = btn.getAttribute('data-report-id');
       const action = btn.getAttribute('data-action');
-      processDispute(reportId, action);
+      processDispute(reportId, action, btn);
     });
   });
 }
 
-async function processDispute(id, action) {
+async function processDispute(id, action, button) {
   const map = {
     freeze: 'freeze-escrow',
     refund: 'refund',
@@ -782,14 +988,25 @@ async function processDispute(id, action) {
     showAlert('Thiếu thông tin hành động.', 'danger');
     return;
   }
+  const reason = await askReasonModal({
+    title: 'Biên bản xử lý tranh chấp',
+    hint: 'Ghi rõ bằng chứng, quyết định, và hướng xử lý cho các bên.',
+    minLength: 10,
+    required: true,
+    submitText: 'Xác nhận xử lý',
+  });
+  if (!reason) return;
+  const confirmed = window.confirm('Xác nhận thực hiện hành động tranh chấp này?');
+  if (!confirmed) return;
   try {
-    await requestJson(`/api/admin/disputes/${encodeURIComponent(id)}/${endpoint}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{}',
+    await runButtonAction(button, async () => {
+      await requestJson(`/api/admin/disputes/${encodeURIComponent(id)}/${endpoint}`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      });
+      showAlert('Đã cập nhật xử lý tranh chấp.');
+      await loadDisputesPage();
     });
-    showAlert('Đã cập nhật xử lý tranh chấp.');
-    await loadDisputesPage();
   } catch (err) {
     showAlert(err?.message || 'Thao tác thất bại.', 'danger');
   }
@@ -961,7 +1178,7 @@ async function loadAdminNotifications() {
     listBox.querySelectorAll('.notif-item[data-read="false"]').forEach((item) => {
       item.addEventListener('click', async () => {
         const id = item.getAttribute('data-id');
-        await fetch(`/api/admin/notifications/${id}/read`, { method: 'PATCH' });
+        await requestJson(`/api/admin/notifications/${id}/read`, { method: 'PATCH' });
         item.classList.remove('unread');
         item.setAttribute('data-read', 'true');
         const dot = item.querySelector('.notif-dot');
@@ -975,7 +1192,7 @@ async function loadAdminNotifications() {
 
   if (markAllBtn) {
     markAllBtn.addEventListener('click', async () => {
-      await fetch('/api/admin/notifications/read-all', { method: 'PATCH' });
+      await requestJson('/api/admin/notifications/read-all', { method: 'PATCH' });
       await render();
     });
   }

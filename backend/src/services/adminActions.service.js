@@ -16,6 +16,30 @@ function decToNumber(d) {
   return Math.round(Number(str) || 0);
 }
 
+function normalizeReason(reason) {
+  return String(reason || '').trim();
+}
+
+function ensureReason(reason, minLen, message) {
+  const value = normalizeReason(reason);
+  if (value.length < minLen) {
+    const err = new Error(message);
+    err.status = 400;
+    throw err;
+  }
+  return value;
+}
+
+async function notifyUser(userId, title, content) {
+  if (!userId) return;
+  await Notification.create({
+    user: userId,
+    title,
+    content,
+    isRead: false,
+  });
+}
+
 export async function listPendingCompanions(keyword) {
   const list = await Companion.find({ status: 'PENDING' })
     .populate('user', 'username')
@@ -39,13 +63,28 @@ export async function listPendingCompanions(keyword) {
   );
 }
 
-export async function setCompanionStatus(companionId, status) {
-  const c = await Companion.findByIdAndUpdate(companionId, { status }, { new: true });
+export async function setCompanionStatus(companionId, status, options = {}) {
+  const reason =
+    status === 'REJECTED'
+      ? ensureReason(options.reason, 10, 'Vui lòng nhập lý do từ chối hồ sơ (ít nhất 10 ký tự).')
+      : normalizeReason(options.reason);
+  const c = await Companion.findByIdAndUpdate(companionId, { status }, { new: true }).populate(
+    'user',
+    '_id'
+  );
   if (!c) {
     const err = new Error('Không tìm thấy companion.');
     err.status = 404;
     throw err;
   }
+  const note = reason ? `\nLý do: ${reason}` : '';
+  await notifyUser(
+    c.user?._id,
+    status === 'APPROVED' ? 'Hồ sơ Companion đã được duyệt' : 'Hồ sơ Companion bị từ chối',
+    status === 'APPROVED'
+      ? `Admin đã duyệt hồ sơ Companion của bạn.${note}`
+      : `Admin đã từ chối hồ sơ Companion của bạn.${note}`
+  );
   return c;
 }
 
@@ -125,7 +164,8 @@ export async function listUsersAndCompanions(keyword) {
   };
 }
 
-export async function banUser(userId) {
+export async function banUser(userId, options = {}) {
+  const reason = ensureReason(options.reason, 8, 'Vui lòng nhập lý do khóa tài khoản (ít nhất 8 ký tự).');
   const u = await User.findByIdAndUpdate(
     userId,
     { moderationFlag: 'BANNED', locked: true },
@@ -136,18 +176,30 @@ export async function banUser(userId) {
     err.status = 404;
     throw err;
   }
+  await notifyUser(
+    u._id,
+    'Tài khoản bị khóa',
+    `Tài khoản của bạn đã bị khóa bởi admin.\nLý do: ${reason}`
+  );
 }
 
-export async function warnUser(userId) {
+export async function warnUser(userId, options = {}) {
+  const reason = ensureReason(options.reason, 8, 'Vui lòng nhập lý do cảnh cáo (ít nhất 8 ký tự).');
   const u = await User.findByIdAndUpdate(userId, { moderationFlag: 'WARNED' }, { new: true });
   if (!u) {
     const err = new Error('Không tìm thấy người dùng.');
     err.status = 404;
     throw err;
   }
+  await notifyUser(
+    u._id,
+    'Bạn nhận được cảnh cáo từ admin',
+    `Tài khoản của bạn đã bị cảnh cáo.\nLý do: ${reason}`
+  );
 }
 
-export async function resetUserStatus(userId) {
+export async function resetUserStatus(userId, options = {}) {
+  const note = normalizeReason(options.reason);
   const u = await User.findByIdAndUpdate(
     userId,
     { moderationFlag: 'NONE', locked: false },
@@ -158,6 +210,11 @@ export async function resetUserStatus(userId) {
     err.status = 404;
     throw err;
   }
+  await notifyUser(
+    u._id,
+    'Trạng thái tài khoản đã được khôi phục',
+    `Tài khoản của bạn đã trở về trạng thái bình thường.${note ? `\nGhi chú: ${note}` : ''}`
+  );
 }
 
 export async function listModerationReviews(keyword) {
@@ -183,13 +240,16 @@ export async function listModerationReviews(keyword) {
   }));
 }
 
-export async function hideReviewById(reviewId) {
+export async function hideReviewById(reviewId, options = {}) {
+  const reason = ensureReason(options.reason, 8, 'Vui lòng nhập lý do ẩn review (ít nhất 8 ký tự).');
   const r = await Review.findByIdAndUpdate(reviewId, { hidden: true }, { new: true });
   if (!r) {
     const err = new Error('Không tìm thấy review.');
     err.status = 404;
     throw err;
   }
+  void options.adminUserId;
+  void reason;
 }
 
 async function getOrCreateSettings() {
@@ -266,22 +326,40 @@ export async function setCommissionRate(rate) {
   await PlatformSettings.findOneAndUpdate({}, { commissionRate: num }, { upsert: true, new: true });
 }
 
-export async function approveWithdrawal(id) {
-  const w = await Withdrawal.findByIdAndUpdate(id, { status: 'APPROVED' }, { new: true });
+export async function approveWithdrawal(id, options = {}) {
+  const note = normalizeReason(options.reason);
+  const w = await Withdrawal.findByIdAndUpdate(id, { status: 'APPROVED' }, { new: true }).populate({
+    path: 'companion',
+    select: 'user',
+  });
   if (!w) {
     const err = new Error('Không tìm thấy lệnh rút.');
     err.status = 404;
     throw err;
   }
+  await notifyUser(
+    w.companion?.user,
+    'Lệnh rút tiền đã được duyệt',
+    `Yêu cầu rút tiền của bạn đã được duyệt.${note ? `\nGhi chú: ${note}` : ''}`
+  );
 }
 
-export async function rejectWithdrawal(id) {
-  const w = await Withdrawal.findByIdAndUpdate(id, { status: 'REJECTED' }, { new: true });
+export async function rejectWithdrawal(id, options = {}) {
+  const reason = ensureReason(options.reason, 8, 'Vui lòng nhập lý do từ chối lệnh rút (ít nhất 8 ký tự).');
+  const w = await Withdrawal.findByIdAndUpdate(id, { status: 'REJECTED' }, { new: true }).populate({
+    path: 'companion',
+    select: 'user',
+  });
   if (!w) {
     const err = new Error('Không tìm thấy lệnh rút.');
     err.status = 404;
     throw err;
   }
+  await notifyUser(
+    w.companion?.user,
+    'Lệnh rút tiền bị từ chối',
+    `Yêu cầu rút tiền của bạn đã bị từ chối.\nLý do: ${reason}`
+  );
 }
 
 export async function listDisputes() {
@@ -298,16 +376,48 @@ export async function listDisputes() {
     reportedUser: r.reportedUser?.username || '',
     reason: r.reason || '',
     status: r.status === 'RESOLVED' ? 'RESOLVED' : 'PENDING',
+    emergency: Boolean(r.emergency),
+    category: r.category || '',
+    resolutionAction: r.resolutionAction || '',
+    resolutionNote: r.resolutionNote || '',
+    lastActionAt: r.lastActionAt || r.createdAt,
     createdAt: r.createdAt,
   }));
 }
 
 /** Xử lý tranh chấp tối giản: đánh dấu báo cáo đã xử lý (có thể mở rộng ký quỹ/hoàn tiền sau). */
-export async function resolveReportAction(reportId) {
-  const r = await Report.findByIdAndUpdate(reportId, { status: 'RESOLVED' }, { new: true });
+export async function resolveReportAction(reportId, options = {}) {
+  const action = options.action;
+  if (!['FREEZE_ESCROW', 'REFUND', 'PAYOUT', 'CLOSE'].includes(action)) {
+    const err = new Error('Hành động tranh chấp không hợp lệ.');
+    err.status = 400;
+    throw err;
+  }
+  const note = ensureReason(
+    options.reason,
+    10,
+    'Vui lòng nhập biên bản xử lý tranh chấp (ít nhất 10 ký tự).'
+  );
+  const update = {
+    resolutionAction: action,
+    resolutionNote: note,
+    lastActionAt: new Date(),
+  };
+  if (action !== 'FREEZE_ESCROW') {
+    update.status = 'RESOLVED';
+    update.resolvedAt = new Date();
+    update.resolvedBy = options.adminUserId;
+  }
+  const r = await Report.findByIdAndUpdate(reportId, update, { new: true });
   if (!r) {
     const err = new Error('Không tìm thấy báo cáo.');
     err.status = 404;
     throw err;
   }
+  const summary = `Báo cáo của bạn đã được admin xử lý với hành động: ${action}.`;
+  const detail = `${summary}\nBiên bản: ${note}`;
+  await Promise.all([
+    notifyUser(r.reporter, 'Cập nhật xử lý tranh chấp', detail),
+    notifyUser(r.reportedUser, 'Cập nhật xử lý tranh chấp', detail),
+  ]);
 }

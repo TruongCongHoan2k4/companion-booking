@@ -3,7 +3,8 @@
 :root {
     --a-primary: #3b82f6;
     --a-primary-light: #60a5fa;
-    --a-sidebar-bg: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+    --a-sidebar-bg: linear-gradient(180deg, rgba(15, 23, 42, 0.72) 0%, rgba(30, 41, 59, 0.8) 100%);
+    --a-sidebar-bg-image: url('../img/admin-sidebar.jpg');
     --a-sidebar-hover: rgba(255, 255, 255, 0.06);
     --a-sidebar-active: linear-gradient(135deg, #3b82f6, #6366f1);
     --a-topbar-bg: #ffffff;
@@ -38,7 +39,10 @@ body {
 
 .admin-sidebar {
     width: 270px;
-    background: var(--a-sidebar-bg);
+    background-image: var(--a-sidebar-bg), var(--a-sidebar-bg-image);
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
     color: #fff;
     padding: 1.25rem;
     position: sticky;
@@ -61,12 +65,14 @@ body {
 }
 
 .sidebar-brand::before {
-    content: '';
-    display: inline-block;
+    content: none;
+}
+
+.sidebar-logo {
     width: 32px;
     height: 32px;
-    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
     border-radius: 10px;
+    object-fit: cover;
     flex-shrink: 0;
 }
 

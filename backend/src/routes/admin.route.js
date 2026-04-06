@@ -59,10 +59,38 @@ router.get('/disputes', adminController.disputesList);
 router.post(
   '/disputes/:id/freeze-escrow',
   validateMongoIdParam('id'),
+  (req, _res, next) => {
+    req.actionType = 'FREEZE_ESCROW';
+    next();
+  },
   adminController.disputeAction
 );
-router.post('/disputes/:id/refund', validateMongoIdParam('id'), adminController.disputeAction);
-router.post('/disputes/:id/payout', validateMongoIdParam('id'), adminController.disputeAction);
-router.post('/disputes/:id/close', validateMongoIdParam('id'), adminController.disputeAction);
+router.post(
+  '/disputes/:id/refund',
+  validateMongoIdParam('id'),
+  (req, _res, next) => {
+    req.actionType = 'REFUND';
+    next();
+  },
+  adminController.disputeAction
+);
+router.post(
+  '/disputes/:id/payout',
+  validateMongoIdParam('id'),
+  (req, _res, next) => {
+    req.actionType = 'PAYOUT';
+    next();
+  },
+  adminController.disputeAction
+);
+router.post(
+  '/disputes/:id/close',
+  validateMongoIdParam('id'),
+  (req, _res, next) => {
+    req.actionType = 'CLOSE';
+    next();
+  },
+  adminController.disputeAction
+);
 
 export default router;

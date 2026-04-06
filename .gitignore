@@ -1,0 +1,43 @@
+# === Root ignore (applies to whole repo) ===
+
+# Dependencies
+**/node_modules/
+
+# Build outputs
+**/dist/
+**/build/
+**/.next/
+**/.nuxt/
+
+# Logs
+**/logs/
+**/*.log
+
+# Environment variables (never commit secrets)
+.env
+.env.*
+!.env.example
+
+# Coverage / test artifacts
+**/coverage/
+**/.nyc_output/
+frontend/cypress/videos/
+frontend/cypress/screenshots/
+
+# Cache
+**/.cache/
+**/.parcel-cache/
+**/.vite/
+**/.turbo/
+**/.eslintcache
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+**/.vscode/
+**/.idea/
+
+# Temporary files
+**/*.tmp
+**/*.temp
+
