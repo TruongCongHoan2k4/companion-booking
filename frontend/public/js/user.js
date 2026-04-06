@@ -618,7 +618,8 @@ async function initProfilePage(auth) {
         e.preventDefault();
         const url = new URL('./report.html', window.location.href);
         const params = new URLSearchParams(window.location.search);
-        params.set('reportedUserId', String(companion.user?.id || ''));
+        const rid = companion.user?.id || companion.user?._id || companion.userId || '';
+        params.set('reportedUserId', String(rid || ''));
         url.search = params.toString();
         window.location.href = url.toString();
       });
@@ -1006,7 +1007,13 @@ async function initAppointmentsPage(auth) {
           }
           ${hasPendingExt ? `<button class="btn btn-outline-warning btn-sm booking-action" data-id="${b.id}" data-action="extension-cancel">Hủy yêu cầu gia hạn</button>` : ''}
           ${b.status === 'ACCEPTED' || b.status === 'IN_PROGRESS' ? `<a class="btn btn-outline-dark btn-sm" href="./chat.html?bookingId=${b.id}">Chat/Call</a>` : ''}
-          ${b.status === 'ACCEPTED' || b.status === 'IN_PROGRESS' ? `<a class="btn btn-danger btn-sm" href="./report.html?reportedUserId=${b.companion?.user?.id || ''}&bookingId=${b.id}&emergency=1"><i class="bi bi-exclamation-octagon me-1"></i>SOS</a>` : ''}
+          ${
+            b.status === 'ACCEPTED' || b.status === 'IN_PROGRESS'
+              ? `<a class="btn btn-danger btn-sm" href="./report.html?reportedUserId=${encodeURIComponent(
+                  String(b.companion?.user?.id || b.companion?.user?._id || b.companion?.userId || '')
+                )}&bookingId=${encodeURIComponent(String(b.id || ''))}&emergency=1"><i class="bi bi-exclamation-octagon me-1"></i>SOS</a>`
+              : ''
+          }
         </div>
       </div></div>`;
         })
