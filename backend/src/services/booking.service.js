@@ -9,6 +9,15 @@ import {
   computeHoldAmountVnd,
 } from '../utils/money.util.js';
 
+function isTxnUnsupported(err) {
+  const msg = String(err?.message || '');
+  return (
+    msg.includes('Transaction numbers are only allowed on a replica set member or mongos') ||
+    msg.includes('replica set') ||
+    msg.includes('mongos')
+  );
+}
+
 export function serializeBooking(doc) {
   if (!doc) return doc;
   const o = typeof doc.toObject === 'function' ? doc.toObject() : { ...doc };
@@ -22,6 +31,77 @@ export function serializeBooking(doc) {
 }
 
 export async function createBooking(customerUserId, payload) {
+  // Fallback mode: không dùng transaction nếu MongoDB không phải replica set.
+  // Dev/local vẫn chạy được, đổi lại không còn atomicity (chấp nhận cho môi trường dev).
+  async function createBookingNoTxn() {
+    const companion = await Companion.findById(payload.companionId);
+    if (!companion) {
+      const err = new Error('Không tìm thấy companion.');
+      err.status = 404;
+      throw err;
+    }
+    if (companion.status !== 'APPROVED') {
+      const err = new Error('Companion chưa được duyệt hoặc không khả dụng.');
+      err.status = 400;
+      throw err;
+    }
+
+    let priceDec = companion.pricePerHour;
+    if (payload.servicePricePerHour != null) {
+      priceDec = bigIntToDecimal128(BigInt(Math.floor(payload.servicePricePerHour)));
+    }
+
+    const holdBig = computeHoldAmountVnd(payload.duration, priceDec);
+    if (holdBig <= 0n) {
+      const err = new Error('Số tiền giữ cọc không hợp lệ.');
+      err.status = 400;
+      throw err;
+    }
+
+    const user = await User.findById(customerUserId);
+    if (!user) {
+      const err = new Error('Không tìm thấy khách hàng.');
+      err.status = 404;
+      throw err;
+    }
+
+    const bal = decimal128ToBigInt(user.balance);
+    if (bal < holdBig) {
+      const err = new Error('Số dư ví không đủ để giữ cọc.');
+      err.status = 400;
+      err.code = 'INSUFFICIENT_BALANCE';
+      throw err;
+    }
+
+    const newBal = bal - holdBig;
+    user.balance = bigIntToDecimal128(newBal);
+    await user.save();
+
+    const booking = await Booking.create({
+      customer: customerUserId,
+      companion: companion._id,
+      bookingTime: new Date(payload.bookingTime),
+      duration: payload.duration,
+      location: payload.location || undefined,
+      rentalVenue: payload.rentalVenue || undefined,
+      serviceName: payload.serviceName || undefined,
+      servicePricePerHour: priceDec,
+      note: payload.note || undefined,
+      holdAmount: bigIntToDecimal128(holdBig),
+      status: 'PENDING',
+    });
+
+    await WalletTransaction.create({
+      user: customerUserId,
+      booking: booking._id,
+      amount: bigIntToDecimal128(holdBig),
+      type: 'HOLD',
+      description: 'Giữ cọc đặt lịch (chờ companion xác nhận)',
+    });
+
+    return serializeBooking(booking);
+  }
+
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
@@ -103,7 +183,12 @@ export async function createBooking(customerUserId, payload) {
     await session.commitTransaction();
     return serializeBooking(booking);
   } catch (err) {
-    await session.abortTransaction();
+    try {
+      await session.abortTransaction();
+    } catch (_) {}
+    if (isTxnUnsupported(err)) {
+      return await createBookingNoTxn();
+    }
     throw err;
   } finally {
     session.endSession();
@@ -111,6 +196,63 @@ export async function createBooking(customerUserId, payload) {
 }
 
 export async function workflowBooking(companionDocId, bookingId, action) {
+  async function workflowBookingNoTxn() {
+    const booking = await Booking.findById(bookingId);
+    if (!booking) {
+      const err = new Error('Không tìm thấy đơn đặt lịch.');
+      err.status = 404;
+      throw err;
+    }
+    if (booking.companion.toString() !== companionDocId.toString()) {
+      const err = new Error('Bạn không có quyền xử lý đơn này.');
+      err.status = 403;
+      throw err;
+    }
+    if (booking.status !== 'PENDING') {
+      const err = new Error('Đơn không còn ở trạng thái chờ xác nhận.');
+      err.status = 400;
+      throw err;
+    }
+
+    if (action === 'ACCEPT') {
+      booking.status = 'ACCEPTED';
+      booking.acceptedAt = new Date();
+      await booking.save();
+      return serializeBooking(booking);
+    }
+
+    if (action === 'REJECT') {
+      booking.status = 'REJECTED';
+      await booking.save();
+
+      const refund = decimal128ToBigInt(booking.holdAmount);
+      if (refund > 0n) {
+        const customer = await User.findById(booking.customer);
+        if (!customer) {
+          const err = new Error('Không tìm thấy khách hàng để hoàn tiền.');
+          err.status = 500;
+          throw err;
+        }
+        const cBal = decimal128ToBigInt(customer.balance);
+        customer.balance = bigIntToDecimal128(cBal + refund);
+        await customer.save();
+
+        await WalletTransaction.create({
+          user: booking.customer,
+          booking: booking._id,
+          amount: bigIntToDecimal128(refund),
+          type: 'REFUND',
+          description: 'Hoàn cọc — companion từ chối đơn',
+        });
+      }
+      return serializeBooking(booking);
+    }
+
+    const err = new Error('Hành động không hợp lệ.');
+    err.status = 400;
+    throw err;
+  }
+
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
@@ -169,7 +311,12 @@ export async function workflowBooking(companionDocId, bookingId, action) {
     await session.commitTransaction();
     return serializeBooking(booking);
   } catch (err) {
-    await session.abortTransaction();
+    try {
+      await session.abortTransaction();
+    } catch (_) {}
+    if (isTxnUnsupported(err)) {
+      return await workflowBookingNoTxn();
+    }
     throw err;
   } finally {
     session.endSession();
