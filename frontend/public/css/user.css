@@ -30,6 +30,12 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
+/* Hide native password reveal/clear buttons (Edge/IE) to avoid duplicate eye icons */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+    display: none;
+}
+
 .user-hero {
     background: var(--u-gradient);
     color: #fff;
@@ -197,6 +203,37 @@ body {
 .form-control:focus, .form-select:focus {
     border-color: var(--u-primary-light);
     box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+}
+
+/* Password input group: make input + eye button seamless */
+.input-group > .form-control:has(+ .password-toggle-btn) {
+    border-top-right-radius: 0 !important;
+    border-bottom-right-radius: 0 !important;
+    border-right: 0 !important;
+}
+
+.password-toggle-btn {
+    border: 2px solid var(--u-border) !important;
+    border-left: 0 !important;
+    border-top-right-radius: var(--u-radius) !important;
+    border-bottom-right-radius: var(--u-radius) !important;
+    background: #fff !important;
+    color: var(--u-text-secondary) !important;
+    padding: 0.65rem 0.95rem !important;
+    line-height: 1;
+}
+
+.password-toggle-btn:hover {
+    background: var(--u-gradient-soft) !important;
+    color: var(--u-text) !important;
+}
+
+.password-toggle-btn:focus {
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1) !important;
+}
+
+.password-toggle-btn:active {
+    transform: none !important;
 }
 
 .btn-primary {

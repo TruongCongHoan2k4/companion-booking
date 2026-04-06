@@ -153,7 +153,11 @@ h1.h3 {
     background: linear-gradient(135deg, #64748b, #94a3b8) !important;
 }
 
-#alert-box .alert {
+#alert-box {
+    z-index: 9999;
+}
+
+.toast {
     border: none;
     border-radius: var(--c-radius-lg);
     font-weight: 500;
