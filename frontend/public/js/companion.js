@@ -912,6 +912,190 @@ async function loadAvailabilities() {
     .filter((x) => x.start && x.end)
     .sort((a, b) => a.start - b.start);
 
+  // Calendar view (week time-grid): hiển thị rảnh/bận theo booking.
+  const cal = document.getElementById('availability-calendar');
+  const labelEl = document.getElementById('avail-week-label');
+  const prevBtn = document.getElementById('avail-prev-week');
+  const nextBtn = document.getElementById('avail-next-week');
+  const todayBtn = document.getElementById('avail-today');
+  const hourStart = 0; // 00:00
+  const hourEnd = 24; // 24:00 (không inclusive)
+  const pxPerHour = 60;
+
+  if (!window.__cbAvailState) {
+    window.__cbAvailState = { anchor: new Date() };
+  }
+
+  function startOfWeekMonday(d) {
+    const x = new Date(d);
+    const day = (x.getDay() + 6) % 7; // Monday=0
+    x.setDate(x.getDate() - day);
+    x.setHours(0, 0, 0, 0);
+    return x;
+  }
+
+  function fmtDayHeader(d) {
+    const dow = d.toLocaleDateString('vi-VN', { weekday: 'short' });
+    const ddmm = d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+    return { dow, ddmm };
+  }
+
+  function intersects(slot, dayStart, dayEnd) {
+    return slot.end > dayStart && slot.start < dayEnd;
+  }
+
+  function clampToRange(date, min, max) {
+    const t = date.getTime();
+    if (t < min.getTime()) return new Date(min);
+    if (t > max.getTime()) return new Date(max);
+    return date;
+  }
+
+  function renderWeek() {
+    if (!cal) return;
+    const anchor = window.__cbAvailState.anchor || new Date();
+    const weekStart = startOfWeekMonday(anchor);
+    const days = Array.from({ length: 7 }, (_, i) => new Date(weekStart.getTime() + i * 86400000));
+
+    const weekEnd = new Date(days[6].getTime());
+    weekEnd.setHours(23, 59, 59, 999);
+    if (labelEl) {
+      const a = days[0].toLocaleDateString('vi-VN');
+      const b = days[6].toLocaleDateString('vi-VN');
+      labelEl.textContent = `${a} → ${b}`;
+    }
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'cb-avail-header';
+    header.innerHTML = `<div class="cell"></div>${days
+      .map((d) => {
+        const h = fmtDayHeader(d);
+        return `<div class="cell"><div class="dow"><span>${escapeHtml(h.dow)}</span><span class="date">${escapeHtml(
+          h.ddmm
+        )}</span></div></div>`;
+      })
+      .join('')}`;
+
+    // Grid
+    const grid = document.createElement('div');
+    grid.className = 'cb-avail-grid';
+    grid.style.height = `${(hourEnd - hourStart) * pxPerHour}px`;
+
+    // Time column
+    const timeCol = document.createElement('div');
+    timeCol.className = 'time-col';
+    timeCol.style.position = 'relative';
+    timeCol.style.background = '#fff';
+    for (let h = hourStart; h <= hourEnd; h++) {
+      const y = (h - hourStart) * pxPerHour;
+      const line = document.createElement('div');
+      line.className = 'hour-line';
+      line.style.top = `${y}px`;
+      timeCol.appendChild(line);
+      if (h < hourEnd) {
+        const lab = document.createElement('div');
+        lab.className = 'hour-label';
+        lab.style.top = `${y}px`;
+        lab.textContent = `${String(h).padStart(2, '0')}:00`;
+        timeCol.appendChild(lab);
+      }
+    }
+    grid.appendChild(timeCol);
+
+    // Day columns + busy blocks
+    days.forEach((day) => {
+      const dayCol = document.createElement('div');
+      dayCol.className = 'day-col';
+      dayCol.style.position = 'relative';
+
+      const dayStart = new Date(day);
+      const dayEnd = new Date(dayStart.getTime() + 86400000);
+
+      // Hour lines
+      for (let h = hourStart; h <= hourEnd; h++) {
+        const y = (h - hourStart) * pxPerHour;
+        const line = document.createElement('div');
+        line.className = 'hour-line';
+        line.style.top = `${y}px`;
+        dayCol.appendChild(line);
+      }
+
+      // Busy blocks
+      const viewStart = new Date(dayStart);
+      viewStart.setHours(hourStart, 0, 0, 0);
+      const viewEnd = new Date(dayStart);
+      viewEnd.setHours(hourEnd, 0, 0, 0);
+
+      const daySlots = busySlots.filter((s) => intersects(s, dayStart, dayEnd));
+      daySlots.forEach((s) => {
+        const s0 = clampToRange(s.start, viewStart, viewEnd);
+        const e0 = clampToRange(s.end, viewStart, viewEnd);
+        const minutes = Math.max(10, Math.round((e0.getTime() - s0.getTime()) / 60000));
+        const topMin = Math.round((s0.getHours() * 60 + s0.getMinutes()) - hourStart * 60);
+        const top = (topMin / 60) * pxPerHour;
+        const height = (minutes / 60) * pxPerHour;
+        // Không render nếu nằm ngoài khung giờ hiển thị
+        if (height <= 2 || top + height <= 0 || top >= (hourEnd - hourStart) * pxPerHour) return;
+
+        const card = document.createElement('div');
+        card.className = 'cb-avail-busy';
+        card.style.top = `${Math.max(0, top)}px`;
+        card.style.height = `${Math.min((hourEnd - hourStart) * pxPerHour - Math.max(0, top), height)}px`;
+        const timeLabel = `${s.start.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}–${s.end.toLocaleTimeString(
+          'vi-VN',
+          { hour: '2-digit', minute: '2-digit' }
+        )}`;
+        card.innerHTML = `
+          <div class="t1">${escapeHtml(timeLabel)} • ${escapeHtml(String(s.status || ''))}</div>
+          <div class="t2">${escapeHtml(s.customerName)} • ${escapeHtml(s.location || '-')}</div>
+        `;
+        dayCol.appendChild(card);
+      });
+
+      grid.appendChild(dayCol);
+    });
+
+    // Now line (nếu đang nằm trong tuần)
+    const now = new Date();
+    if (now >= weekStart && now <= weekEnd) {
+      const viewStart = new Date(now);
+      viewStart.setHours(hourStart, 0, 0, 0);
+      const viewEnd = new Date(now);
+      viewEnd.setHours(hourEnd, 0, 0, 0);
+      if (now >= viewStart && now <= viewEnd) {
+        const y = (((now.getHours() * 60 + now.getMinutes()) - hourStart * 60) / 60) * pxPerHour;
+        const line = document.createElement('div');
+        line.className = 'cb-avail-now';
+        line.style.top = `${Math.max(0, y)}px`;
+        cal.appendChild(line);
+      }
+    }
+
+    cal.replaceChildren(header, grid);
+  }
+
+  // bind nav buttons once
+  if (!window.__cbAvailState.bound && (prevBtn || nextBtn || todayBtn)) {
+    window.__cbAvailState.bound = true;
+    prevBtn?.addEventListener('click', () => {
+      const a = window.__cbAvailState.anchor || new Date();
+      window.__cbAvailState.anchor = new Date(a.getTime() - 7 * 86400000);
+      renderWeek();
+    });
+    nextBtn?.addEventListener('click', () => {
+      const a = window.__cbAvailState.anchor || new Date();
+      window.__cbAvailState.anchor = new Date(a.getTime() + 7 * 86400000);
+      renderWeek();
+    });
+    todayBtn?.addEventListener('click', () => {
+      window.__cbAvailState.anchor = new Date();
+      renderWeek();
+    });
+  }
+
+  renderWeek();
+
   if (!busySlots.length) {
     rows.innerHTML = '<tr><td colspan="4" class="text-muted">Hiện chưa có khung giờ bận nào.</td></tr>';
     return;
@@ -1374,6 +1558,26 @@ async function loadBankAccount() {
   if (bankName) bankName.value = data.bankName || '';
   if (bankAccountNumber) bankAccountNumber.value = data.bankAccountNumber || '';
   if (accountHolderName) accountHolderName.value = data.accountHolderName || '';
+
+  // UX: đã lưu rồi thì thu gọn form, chỉ hiện tóm tắt + nút Sửa.
+  try {
+    const bn = String(data.bankName || '').trim();
+    const acc = String(data.bankAccountNumber || '').trim();
+    const holder = String(data.accountHolderName || '').trim();
+    const summary = document.getElementById('comp-bank-summary');
+    const summaryText = document.getElementById('comp-bank-summary-text');
+    const fields = document.getElementById('comp-bank-fields');
+    if (!summary || !summaryText || !fields) return;
+    const hasAll = bn && acc && holder;
+    if (hasAll) {
+      summaryText.textContent = `Tên ngân hàng: ${bn}\nSố tài khoản: ${acc}\nTên chủ tài khoản: ${holder}`;
+      summary.classList.remove('d-none');
+      fields.classList.add('d-none');
+    } else {
+      summary.classList.add('d-none');
+      fields.classList.remove('d-none');
+    }
+  } catch (_) {}
 }
 
 async function saveBankAccount(e) {
@@ -1384,6 +1588,7 @@ async function saveBankAccount(e) {
     accountHolderName: document.getElementById('account-holder-name').value.trim(),
   });
   showAlert('Đã lưu tài khoản ngân hàng nhận tiền.');
+  await loadBankAccount();
 }
 
 async function bootstrap() {
@@ -1584,6 +1789,15 @@ async function bootstrap() {
         }
       });
     }
+
+    // Nút "Sửa" cho phần tài khoản ngân hàng (finance page).
+    document.getElementById('comp-bank-edit-btn')?.addEventListener('click', () => {
+      const summary = document.getElementById('comp-bank-summary');
+      const fields = document.getElementById('comp-bank-fields');
+      if (summary) summary.classList.add('d-none');
+      if (fields) fields.classList.remove('d-none');
+      document.getElementById('bank-name')?.focus?.();
+    });
 
     const tasks = [];
     if (page === 'companion-dashboard') {

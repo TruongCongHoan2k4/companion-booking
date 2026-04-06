@@ -298,7 +298,11 @@ function companionCard(companion) {
           </div>
           <div class="d-grid gap-2">
             <a class="btn btn-outline-primary btn-sm" href="./profile.html?id=${companion.id}"><i class="bi bi-person-lines-fill me-1"></i>Xem profile</a>
-            <a class="btn btn-primary btn-sm" href="./booking.html?id=${companion.id}"><i class="bi bi-calendar-plus me-1"></i>Đặt lịch</a>
+            ${
+              companion.onlineStatus
+                ? `<a class="btn btn-primary btn-sm" href="./booking.html?id=${companion.id}"><i class="bi bi-calendar-plus me-1"></i>Đặt lịch</a>`
+                : `<button class="btn btn-primary btn-sm" type="button" disabled title="Companion đang offline"><i class="bi bi-calendar-plus me-1"></i>Đặt lịch</button>`
+            }
           </div>
         </div>
       </div>
@@ -527,8 +531,11 @@ async function initProfilePage(auth) {
               <div class="text-muted small">@${escapeHtml(companion.user?.username || '')}</div>
             </div>
             <div class="d-flex flex-wrap gap-2 justify-content-lg-end ms-lg-auto">
-              <a class="btn btn-primary" href="./booking.html?id=${escapeHtml(companion.id)}"><i class="bi bi-calendar-plus me-1"></i>Đặt lịch</a>
-              <a id="profile-report-btn" class="btn btn-outline-warning" href="./report.html"><i class="bi bi-flag me-1"></i>Tố cáo / SOS</a>
+              ${
+                companion.onlineStatus
+                  ? `<a class="btn btn-primary" href="./booking.html?id=${escapeHtml(companion.id)}"><i class="bi bi-calendar-plus me-1"></i>Đặt lịch</a>`
+                  : `<button class="btn btn-primary" type="button" disabled title="Companion đang offline"><i class="bi bi-calendar-plus me-1"></i>Đặt lịch</button>`
+              }
               ${auth.authenticated ? `<button id="add-favorite-btn" class="btn btn-outline-danger"><i class="bi bi-heart me-1"></i>Yêu thích</button>` : ''}
             </div>
           </div>
@@ -611,19 +618,6 @@ async function initProfilePage(auth) {
       });
     }
 
-    // Nút "Tố cáo / SOS": bắt buộc có reportedUserId và giữ nguyên mọi query param hiện có.
-    const reportBtn = document.getElementById('profile-report-btn');
-    if (reportBtn) {
-      reportBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        const url = new URL('./report.html', window.location.href);
-        const params = new URLSearchParams(window.location.search);
-        const rid = companion.user?.id || companion.user?._id || companion.userId || '';
-        params.set('reportedUserId', String(rid || ''));
-        url.search = params.toString();
-        window.location.href = url.toString();
-      });
-    }
   } catch (err) {
     box.innerHTML = `<div class="empty-state">Không thể tải hồ sơ: ${escapeHtml(err?.message || err || '')}</div>`;
   }
@@ -1008,10 +1002,8 @@ async function initAppointmentsPage(auth) {
           ${hasPendingExt ? `<button class="btn btn-outline-warning btn-sm booking-action" data-id="${b.id}" data-action="extension-cancel">Hủy yêu cầu gia hạn</button>` : ''}
           ${b.status === 'ACCEPTED' || b.status === 'IN_PROGRESS' ? `<a class="btn btn-outline-dark btn-sm" href="./chat.html?bookingId=${b.id}">Chat/Call</a>` : ''}
           ${
-            b.status === 'ACCEPTED' || b.status === 'IN_PROGRESS'
-              ? `<a class="btn btn-danger btn-sm" href="./report.html?reportedUserId=${encodeURIComponent(
-                  String(b.companion?.user?.id || b.companion?.user?._id || b.companion?.userId || '')
-                )}&bookingId=${encodeURIComponent(String(b.id || ''))}&emergency=1"><i class="bi bi-exclamation-octagon me-1"></i>SOS</a>`
+            b.status === 'IN_PROGRESS'
+              ? `<a class="btn btn-danger btn-sm" href="./report.html?bookingId=${encodeURIComponent(String(b.id || ''))}&emergency=1"><i class="bi bi-flag-fill me-1"></i>Tố cáo</a>`
               : ''
           }
         </div>
@@ -1212,13 +1204,67 @@ async function initReviewPage(auth) {
 async function initReportPage(auth) {
   if (!requireLogin(auth)) return;
   const params = new URLSearchParams(window.location.search);
-  const reportedUserInput = document.getElementById('reportedUserId');
-  const fromReported = params.get('reportedUserId');
-  const fromLegacy = params.get('id');
-  const picked = fromReported != null && String(fromReported).trim() ? String(fromReported).trim() : String(fromLegacy || '').trim();
-  if (picked) {
-    reportedUserInput.value = picked;
+  const bookingSelect = document.getElementById('report-booking-select');
+  let reportThreads = [];
+
+  function normalizeThreads(list) {
+    return (Array.isArray(list) ? list : [])
+      .map((b) => {
+        const partner =
+          b.companion?.user?.fullName ||
+          b.companion?.user?.username ||
+          b.customer?.fullName ||
+          b.customer?.username ||
+          'Đối phương';
+        return {
+          bookingId: String(b.id || b._id || '').trim(),
+          partnerName: partner,
+          status: b.status || '-',
+          bookingTime: b.bookingTime,
+        };
+      })
+      .filter((t) => Boolean(t.bookingId));
   }
+
+  async function loadReportBookings() {
+    const results = [];
+    const myBookingsRes = await apiFetch('/api/bookings/me', { headers: {} });
+    results.push(...normalizeThreads(await bookingsMeList(myBookingsRes)));
+    const companionBookingsRes = await apiFetch('/api/companions/me/bookings', { headers: {} });
+    if (companionBookingsRes.ok) {
+      const raw = await companionBookingsRes.json();
+      const arr = Array.isArray(raw) ? raw : raw.items ?? [];
+      results.push(...normalizeThreads(arr));
+    }
+    const uniq = new Map();
+    results.forEach((item) => {
+      if (!uniq.has(item.bookingId)) uniq.set(item.bookingId, item);
+    });
+    const allowedReportStatuses = new Set(['IN_PROGRESS', 'COMPLETED']);
+    reportThreads = [...uniq.values()]
+      .filter((t) => allowedReportStatuses.has(String(t.status || '').toUpperCase()))
+      .sort((a, b) => new Date(b.bookingTime || 0) - new Date(a.bookingTime || 0));
+  }
+
+  function renderReportBookingSelect() {
+    if (!bookingSelect) return;
+    if (!reportThreads.length) {
+      bookingSelect.innerHTML = `<option value="">Bạn chưa có đơn nào</option>`;
+      bookingSelect.value = '';
+      bookingSelect.disabled = true;
+      return;
+    }
+    bookingSelect.disabled = false;
+    bookingSelect.innerHTML = reportThreads
+      .map((t) => {
+        const label = `${t.partnerName || 'Đối phương'} • ${t.status || '-'} • ${formatDateTime(t.bookingTime) || ''}`.trim();
+        return `<option value="${escapeHtml(t.bookingId)}">${escapeHtml(label)}</option>`;
+      })
+      .join('');
+    const preferred = String(params.get('bookingId') || '').trim();
+    bookingSelect.value = reportThreads.some((t) => t.bookingId === preferred) ? preferred : reportThreads[0].bookingId;
+  }
+
   async function buildEmergencyReasonFromBooking(bookingId) {
     if (!bookingId) return 'SOS khẩn cấp. Cần hỗ trợ ngay.';
     const res = await apiFetch('/api/bookings/me', { headers: {} });
@@ -1246,13 +1292,12 @@ async function initReportPage(auth) {
     primeReporterGeolocationFromGesture();
     const reason = document.getElementById('reason');
     if (reason && !reason.value.trim()) {
-      const bookingIdFromQuery = new URLSearchParams(window.location.search).get('bookingId');
-      reason.value = await buildEmergencyReasonFromBooking(bookingIdFromQuery);
+      const bid = bookingSelect?.value || new URLSearchParams(window.location.search).get('bookingId');
+      reason.value = await buildEmergencyReasonFromBooking(bid);
     }
     reason?.focus();
   });
   const emergencyQuick = params.get('emergency') === '1';
-  const bookingIdFromQuery = params.get('bookingId');
   if (emergencyQuick) {
     const emergencyCheckbox = document.getElementById('isEmergency');
     if (emergencyCheckbox) emergencyCheckbox.checked = true;
@@ -1260,7 +1305,8 @@ async function initReportPage(auth) {
     if (category) category.value = 'OTHER';
     const reason = document.getElementById('reason');
     if (reason && !reason.value.trim()) {
-      reason.value = await buildEmergencyReasonFromBooking(bookingIdFromQuery);
+      const bid = bookingSelect?.value || params.get('bookingId');
+      reason.value = await buildEmergencyReasonFromBooking(bid);
     }
   }
   document.getElementById('report-form')?.addEventListener('submit', async (e) => {
@@ -1304,13 +1350,16 @@ async function initReportPage(auth) {
         setMessage('report-message', '', '');
       }
     }
-    const bookingIdParam = params.get('bookingId');
+    const bookingIdParam = bookingSelect?.value || params.get('bookingId');
+    if (!bookingIdParam) {
+      setMessage('report-message', 'warning', 'Vui lòng chọn đơn liên quan trước khi gửi tố cáo.');
+      return;
+    }
     const payload = {
-      reportedUserId: String(reportedUserInput.value || '').trim(),
       reason: document.getElementById('reason').value,
       category: document.getElementById('reportCategory').value,
       emergency: isEmergency,
-      bookingId: bookingIdParam ? String(bookingIdParam).trim() : null,
+      bookingId: String(bookingIdParam).trim(),
       reporterLatitude,
       reporterLongitude,
     };
@@ -1325,6 +1374,25 @@ async function initReportPage(auth) {
     }
   });
 
+  function reportStatusLabel(status) {
+    const s = String(status || '').toUpperCase();
+    if (s === 'RESOLVED') return 'Đã xử lý';
+    if (s === 'PENDING') return 'Đang chờ';
+    return status || 'Đang chờ';
+  }
+
+  function reportCategoryLabel(category) {
+    const c = String(category || '').toUpperCase();
+    const map = {
+      FAKE_PROFILE: 'Không giống ảnh',
+      LATE: 'Đi trễ',
+      HARASSMENT: 'Quấy rối',
+      BAD_ATTITUDE: 'Thái độ không tốt',
+      OTHER: 'Khác',
+    };
+    return map[c] || (category || 'Khác');
+  }
+
   async function loadMyReports() {
     const res = await apiFetch('/api/reports/me', { headers: {} });
     const reports = res.ok ? await res.json() : [];
@@ -1334,8 +1402,9 @@ async function initReportPage(auth) {
           .map(
             (r) => `
             <div class="card user-card mb-2"><div class="card-body">
-              <div><strong>Tố cáo user #${r.reportedUser?.id || '-'}</strong> - ${escapeHtml(r.status || 'PENDING')}</div>
-              <div><strong>Loại:</strong> ${escapeHtml(r.category || 'OTHER')} ${r.emergency ? '<span class="badge bg-danger">SOS</span>' : ''}</div>
+              <div><strong>Tố cáo</strong> - ${escapeHtml(reportStatusLabel(r.status))}</div>
+              <div><strong>Loại:</strong> ${escapeHtml(reportCategoryLabel(r.category))} ${r.emergency ? '<span class="badge bg-danger">SOS</span>' : ''}</div>
+              ${r.booking?.id ? `<div class="small"><strong>Booking:</strong> ${escapeHtml(String(r.booking.id))}</div>` : ''}
               <div class="text-muted small">${escapeHtml(formatDateTime(r.createdAt))}</div>
               ${r.reporterLatitude != null && r.reporterLongitude != null ? `<div class="small mb-1"><a href="https://www.google.com/maps?q=${encodeURIComponent(String(r.reporterLatitude) + ',' + String(r.reporterLongitude))}" target="_blank" rel="noopener">Vị trí GPS lúc gửi</a></div>` : ''}
               <div class="report-reason-text">${escapeHtml(r.reason || '').replace(/\n/g, '<br>')}</div>
@@ -1345,6 +1414,8 @@ async function initReportPage(auth) {
       : `<div class="empty-state">Bạn chưa gửi tố cáo nào.</div>`;
   }
 
+  await loadReportBookings();
+  renderReportBookingSelect();
   await loadMyReports();
 }
 
@@ -1788,36 +1859,68 @@ async function initNotificationsPage(auth) {
 
 async function initWalletPage(auth) {
   if (!requireLogin(auth)) return;
-  const walletRes = await apiFetch('/api/wallet/me', { headers: {} });
-  const wallet = walletRes.ok ? await walletRes.json() : { walletBalance: '0' };
-  const bal = wallet.walletBalance ?? wallet.balance ?? 0;
-  document.getElementById('wallet-balance').textContent = `${Number(bal || 0).toLocaleString('vi-VN')} VND`;
-
-  document.getElementById('deposit-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const payload = {
-      amount: Number(document.getElementById('depositAmount').value),
-      provider: document.getElementById('provider').value,
+  const WITHDRAW_BANK_STORAGE_KEY = 'cb_user_withdraw_bank_v1';
+  if (!window.__cbUserWalletState) {
+    window.__cbUserWalletState = {
+      bound: false,
+      withdrawInFlight: false,
     };
-    const res = await apiFetch('/api/wallet/deposit', { method: 'POST', body: JSON.stringify(payload) });
-    if (res.ok) {
-      setMessage('wallet-message', 'success', 'Nạp tiền thành công');
-      document.getElementById('deposit-form').reset();
-      await initWalletPage(auth);
-    } else {
-      const text = await res.text();
-      setMessage('wallet-message', 'danger', text || 'Nạp tiền thất bại');
-    }
-  });
+  }
+  const walletState = window.__cbUserWalletState;
 
-  const txRes = await apiFetch('/api/wallet/me', { headers: {} });
-  const wallet2 = txRes.ok ? await txRes.json() : { transactions: [] };
-  const txs = Array.isArray(wallet2?.transactions) ? wallet2.transactions : [];
-  const box = document.getElementById('wallet-transactions');
-  box.innerHTML = txs.length
-    ? txs
-        .map(
-          (t) => `
+  function readWithdrawBankFromStorage() {
+    try {
+      const raw = localStorage.getItem(WITHDRAW_BANK_STORAGE_KEY);
+      if (!raw) return null;
+      const j = JSON.parse(raw);
+      if (!j || typeof j !== 'object') return null;
+      const bankName = String(j.bankName || '').trim();
+      const bankAccountNumber = String(j.bankAccountNumber || '').trim();
+      const accountHolderName = String(j.accountHolderName || '').trim();
+      if (!bankName || !bankAccountNumber || !accountHolderName) return null;
+      return { bankName, bankAccountNumber, accountHolderName };
+    } catch {
+      return null;
+    }
+  }
+
+  function writeWithdrawBankToStorage(bank) {
+    try {
+      localStorage.setItem(WITHDRAW_BANK_STORAGE_KEY, JSON.stringify(bank));
+    } catch (_) {}
+  }
+
+  function renderWithdrawBankSummary(bank) {
+    const summary = document.getElementById('withdraw-bank-summary');
+    const summaryText = document.getElementById('withdraw-bank-summary-text');
+    const fields = document.getElementById('withdraw-bank-fields');
+    if (!summary || !summaryText || !fields) return;
+    if (!bank) {
+      summary.classList.add('d-none');
+      fields.classList.remove('d-none');
+      return;
+    }
+    summaryText.textContent = `Tên ngân hàng: ${bank.bankName}\nSố tài khoản: ${bank.bankAccountNumber}\nTên chủ tài khoản: ${bank.accountHolderName}`;
+    summary.classList.remove('d-none');
+    fields.classList.add('d-none');
+  }
+
+  async function refreshWalletDataOnly() {
+    const walletRes = await apiFetch('/api/wallet/me', { headers: {} });
+    const wallet = walletRes.ok ? await walletRes.json() : { walletBalance: '0' };
+    const bal = wallet.walletBalance ?? wallet.balance ?? 0;
+    const balEl = document.getElementById('wallet-balance');
+    if (balEl) balEl.textContent = `${Number(bal || 0).toLocaleString('vi-VN')} VND`;
+
+    const txRes = await apiFetch('/api/wallet/me', { headers: {} });
+    const wallet2 = txRes.ok ? await txRes.json() : { transactions: [] };
+    const txs = Array.isArray(wallet2?.transactions) ? wallet2.transactions : [];
+    const box = document.getElementById('wallet-transactions');
+    if (box) {
+      box.innerHTML = txs.length
+        ? txs
+            .map(
+              (t) => `
         <tr>
             <td>${escapeHtml(formatDateTime(t.createdAt))}</td>
             <td>${escapeHtml(t.type || '-')}</td>
@@ -1826,9 +1929,221 @@ async function initWalletPage(auth) {
             <td class="${Number(t.amount) < 0 ? 'text-danger' : 'text-success'}">${Number(t.amount || 0).toLocaleString('vi-VN')} VND</td>
         </tr>
     `
-        )
-        .join('')
-    : `<tr><td colspan="5" class="text-muted">Chưa có giao dịch.</td></tr>`;
+            )
+            .join('')
+        : `<tr><td colspan="5" class="text-muted">Chưa có giao dịch.</td></tr>`;
+    }
+  }
+
+  if (!walletState.bound) {
+    walletState.bound = true;
+
+    document.getElementById('deposit-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const payload = {
+        amount: Number(document.getElementById('depositAmount').value),
+        provider: document.getElementById('provider').value,
+      };
+      const res = await apiFetch('/api/wallet/deposit', { method: 'POST', body: JSON.stringify(payload) });
+      if (res.ok) {
+        setMessage('wallet-message', 'success', 'Nạp tiền thành công');
+        document.getElementById('deposit-form').reset();
+        await refreshWalletDataOnly();
+      } else {
+        const text = await res.text();
+        setMessage('wallet-message', 'danger', text || 'Nạp tiền thất bại');
+      }
+    });
+
+    document.getElementById('withdraw-bank-edit-btn')?.addEventListener('click', () => {
+      renderWithdrawBankSummary(null);
+      document.getElementById('withdrawBankName')?.focus?.();
+    });
+
+    document.getElementById('withdraw-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (walletState.withdrawInFlight) return;
+      const payload = {
+        amount: Number(document.getElementById('withdrawAmount').value),
+        bankName: String(document.getElementById('withdrawBankName').value || '').trim(),
+        bankAccountNumber: String(document.getElementById('withdrawBankAccountNumber').value || '').trim(),
+        accountHolderName: String(document.getElementById('withdrawAccountHolderName').value || '').trim(),
+      };
+      await openWithdrawConfirmModal(payload, async () => {
+        await doWithdrawRequest(payload);
+      });
+    });
+  }
+
+  // Withdraw bank UX: nếu đã lưu lần trước -> thu gọn và hiện tóm tắt.
+  const storedBank = readWithdrawBankFromStorage();
+  if (storedBank) {
+    const bn = document.getElementById('withdrawBankName');
+    const acc = document.getElementById('withdrawBankAccountNumber');
+    const holder = document.getElementById('withdrawAccountHolderName');
+    if (bn) bn.value = storedBank.bankName;
+    if (acc) acc.value = storedBank.bankAccountNumber;
+    if (holder) holder.value = storedBank.accountHolderName;
+  }
+  renderWithdrawBankSummary(storedBank);
+
+  async function openWithdrawConfirmModal(payload, onConfirm) {
+    const amountLabel = `${Number(payload.amount || 0).toLocaleString('vi-VN')} VND`;
+    const bankLabel = `Tên ngân hàng: ${payload.bankName}\nSố tài khoản: ${payload.bankAccountNumber}\nTên chủ tài khoản: ${payload.accountHolderName}`;
+
+    const modalEl = document.getElementById('user-withdraw-confirm-modal');
+    const submitBtn = document.getElementById('user-withdraw-confirm-submit-btn');
+    const amountEl = document.getElementById('user-withdraw-confirm-amount');
+    const bankEl = document.getElementById('user-withdraw-confirm-bank');
+
+    // Ưu tiên Bootstrap modal nếu có và markup tồn tại.
+    if (modalEl && window.bootstrap?.Modal) {
+      if (amountEl) amountEl.textContent = amountLabel;
+      if (bankEl) bankEl.textContent = bankLabel;
+      const modal = new bootstrap.Modal(modalEl);
+      return new Promise((resolve) => {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.onclick = async () => {
+            try {
+              submitBtn.disabled = true;
+              await onConfirm?.();
+              modal.hide();
+            } finally {
+              submitBtn.disabled = false;
+              resolve();
+            }
+          };
+        }
+        modalEl.addEventListener(
+          'hidden.bs.modal',
+          () => {
+            resolve();
+          },
+          { once: true }
+        );
+        modal.show();
+      });
+    }
+
+    // Fallback modal tự dựng (không dùng confirm()).
+    const overlayId = 'cb-user-withdraw-overlay';
+    let overlay = document.getElementById(overlayId);
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = overlayId;
+      overlay.style.cssText =
+        'position:fixed;inset:0;background:rgba(2,6,23,.55);z-index:1090;display:flex;align-items:center;justify-content:center;padding:16px;';
+      overlay.innerHTML = `
+        <div style="width:min(520px, 92vw); background:#fff; border-radius:14px; box-shadow:0 20px 60px rgba(0,0,0,.25); overflow:hidden;">
+          <div style="padding:14px 16px; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; justify-content:space-between; gap:12px;">
+            <div style="font-weight:700;">Xác nhận rút tiền</div>
+            <button type="button" data-action="close" style="border:none;background:transparent;font-size:22px;line-height:1;opacity:.7;">×</button>
+          </div>
+          <div style="padding:16px;">
+            <div style="color:#64748b; font-size:13px; margin-bottom:10px;">Vui lòng kiểm tra thông tin trước khi tạo lệnh rút.</div>
+            <div style="border:1px solid #e2e8f0; border-radius:12px; padding:12px; background:#f8fafc;">
+              <div style="display:flex; justify-content:space-between; gap:12px;">
+                <div style="color:#64748b;">Số tiền</div>
+                <div style="font-weight:700;" data-field="amount"></div>
+              </div>
+              <div style="height:1px;background:#e2e8f0;margin:10px 0;"></div>
+              <div style="white-space:pre-wrap; color:#475569; font-size:13px;" data-field="bank"></div>
+            </div>
+            <div style="margin-top:12px; border:1px solid #f59e0b33; background:#fff7ed; color:#92400e; border-radius:12px; padding:10px; font-size:13px;">
+              Số tiền sẽ bị trừ khỏi ví ngay và lệnh rút sẽ ở trạng thái chờ xử lý.
+            </div>
+          </div>
+          <div style="padding:14px 16px; border-top:1px solid #e2e8f0; display:flex; justify-content:flex-end; gap:8px;">
+            <button type="button" data-action="cancel" style="padding:8px 12px; border-radius:10px; border:1px solid #cbd5e1; background:#fff;">Hủy</button>
+            <button type="button" data-action="confirm" style="padding:8px 12px; border-radius:10px; border:1px solid #0f172a; background:#0f172a; color:#fff;">Xác nhận tạo lệnh</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+    }
+
+    overlay.querySelector('[data-field="amount"]').textContent = amountLabel;
+    overlay.querySelector('[data-field="bank"]').textContent = bankLabel;
+
+    overlay.style.display = 'flex';
+
+    const close = () => {
+      overlay.style.display = 'none';
+    };
+
+    return new Promise((resolve) => {
+      const onClick = async (ev) => {
+        const btn = ev.target?.closest?.('button[data-action]');
+        const action = btn?.getAttribute?.('data-action');
+        if (!action) return;
+        if (action === 'cancel' || action === 'close') {
+          close();
+          cleanup();
+          resolve();
+          return;
+        }
+        if (action === 'confirm') {
+          try {
+            btn.disabled = true;
+            await onConfirm?.();
+            close();
+          } finally {
+            btn.disabled = false;
+            cleanup();
+            resolve();
+          }
+        }
+      };
+      const onKey = (ev) => {
+        if (ev.key === 'Escape') {
+          close();
+          cleanup();
+          resolve();
+        }
+      };
+      const cleanup = () => {
+        overlay.removeEventListener('click', onClick);
+        document.removeEventListener('keydown', onKey);
+      };
+      overlay.addEventListener('click', onClick);
+      document.addEventListener('keydown', onKey);
+    });
+  }
+
+  async function doWithdrawRequest(payload) {
+    if (walletState.withdrawInFlight) return;
+    walletState.withdrawInFlight = true;
+    const res = await apiFetch('/api/wallet/withdraw', { method: 'POST', body: JSON.stringify(payload) });
+    if (res.ok) {
+      const j = await res.json().catch(() => ({}));
+      writeWithdrawBankToStorage({
+        bankName: payload.bankName,
+        bankAccountNumber: payload.bankAccountNumber,
+        accountHolderName: payload.accountHolderName,
+      });
+      renderWithdrawBankSummary({
+        bankName: payload.bankName,
+        bankAccountNumber: payload.bankAccountNumber,
+        accountHolderName: payload.accountHolderName,
+      });
+      setMessage(
+        'wallet-message',
+        'success',
+        j?.withdrawalId ? `Đã tạo lệnh rút #${escapeHtml(j.withdrawalId)}. Vui lòng chờ xử lý.` : 'Đã tạo lệnh rút. Vui lòng chờ xử lý.'
+      );
+      const amtEl = document.getElementById('withdrawAmount');
+      if (amtEl) amtEl.value = '';
+      await refreshWalletDataOnly();
+      walletState.withdrawInFlight = false;
+      return;
+    }
+    const text = await res.text();
+    setMessage('wallet-message', 'danger', text || 'Tạo lệnh rút thất bại');
+    walletState.withdrawInFlight = false;
+  }
+
+  await refreshWalletDataOnly();
 }
 
 function initAuthPages() {

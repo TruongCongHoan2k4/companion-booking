@@ -7,8 +7,10 @@ import Report from '../models/report.model.js';
 import Withdrawal from '../models/withdrawal.model.js';
 import PlatformSettings from '../models/platformSettings.model.js';
 import WalletTransaction from '../models/walletTransaction.model.js';
+import Booking from '../models/booking.model.js';
 import { bigIntToDecimal128, decimal128ToBigInt } from '../utils/money.util.js';
 import { publishNotification } from '../realtime/realtimeBroadcastService.js';
+import { notifyWalletMutation } from './walletNotify.service.js';
 
 function escapeRegex(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -102,7 +104,7 @@ export async function listPendingCompanions(keyword) {
 export async function setCompanionStatus(companionId, status, options = {}) {
   const reason =
     status === 'REJECTED'
-      ? ensureReason(options.reason, 10, 'Vui lòng nhập lý do từ chối hồ sơ (ít nhất 10 ký tự).')
+      ? ensureReason(options.reason, 1, 'Vui lòng nhập lý do từ chối hồ sơ.')
       : normalizeReason(options.reason);
   const c = await Companion.findByIdAndUpdate(companionId, { status }, { new: true }).populate(
     'user',
@@ -208,7 +210,7 @@ export async function listUsersAndCompanions(keyword) {
 }
 
 export async function banUser(userId, options = {}) {
-  const reason = ensureReason(options.reason, 8, 'Vui lòng nhập lý do khóa tài khoản (ít nhất 8 ký tự).');
+  const reason = ensureReason(options.reason, 1, 'Vui lòng nhập lý do khóa tài khoản.');
   const u = await User.findByIdAndUpdate(
     userId,
     { moderationFlag: 'BANNED', locked: true },
@@ -227,7 +229,7 @@ export async function banUser(userId, options = {}) {
 }
 
 export async function warnUser(userId, options = {}) {
-  const reason = ensureReason(options.reason, 8, 'Vui lòng nhập lý do cảnh cáo (ít nhất 8 ký tự).');
+  const reason = ensureReason(options.reason, 1, 'Vui lòng nhập lý do cảnh cáo.');
   const u = await User.findByIdAndUpdate(userId, { moderationFlag: 'WARNED' }, { new: true });
   if (!u) {
     const err = new Error('Không tìm thấy người dùng.');
@@ -284,7 +286,7 @@ export async function listModerationReviews(keyword) {
 }
 
 export async function hideReviewById(reviewId, options = {}) {
-  const reason = ensureReason(options.reason, 8, 'Vui lòng nhập lý do ẩn review (ít nhất 8 ký tự).');
+  const reason = ensureReason(options.reason, 1, 'Vui lòng nhập lý do ẩn review.');
   const r = await Review.findByIdAndUpdate(reviewId, { hidden: true }, { new: true });
   if (!r) {
     const err = new Error('Không tìm thấy review.');
@@ -430,7 +432,7 @@ export async function approveWithdrawal(id, options = {}) {
 }
 
 export async function rejectWithdrawal(id, options = {}) {
-  const reason = ensureReason(options.reason, 8, 'Vui lòng nhập lý do từ chối lệnh rút (ít nhất 8 ký tự).');
+  const reason = ensureReason(options.reason, 1, 'Vui lòng nhập lý do từ chối lệnh rút.');
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
@@ -480,6 +482,13 @@ export async function rejectWithdrawal(id, options = {}) {
         ],
         { session }
       );
+      void notifyWalletMutation({
+        userId: companionUserId,
+        type: 'REFUND',
+        amountVnd: refund,
+        provider: 'WITHDRAWAL',
+        description: `Hoàn tiền lệnh rút bị từ chối #${String(w._id)}`,
+      });
     }
 
     w.status = 'REJECTED';
@@ -532,6 +541,13 @@ export async function rejectWithdrawal(id, options = {}) {
           provider: 'WITHDRAWAL',
           description: `Hoàn tiền lệnh rút bị từ chối #${String(w._id)}`,
         });
+        void notifyWalletMutation({
+          userId: companionUserId,
+          type: 'REFUND',
+          amountVnd: refund,
+          provider: 'WITHDRAWAL',
+          description: `Hoàn tiền lệnh rút bị từ chối #${String(w._id)}`,
+        });
       }
       w.status = 'REJECTED';
       await w.save();
@@ -574,33 +590,219 @@ export async function listDisputes() {
 /** Xử lý tranh chấp tối giản: đánh dấu báo cáo đã xử lý (có thể mở rộng ký quỹ/hoàn tiền sau). */
 export async function resolveReportAction(reportId, options = {}) {
   const action = options.action;
-  if (!['FREEZE_ESCROW', 'REFUND', 'PAYOUT', 'CLOSE'].includes(action)) {
+  if (!['REFUND', 'PAYOUT'].includes(action)) {
     const err = new Error('Hành động tranh chấp không hợp lệ.');
     err.status = 400;
     throw err;
   }
-  const note = ensureReason(
-    options.reason,
-    10,
-    'Vui lòng nhập biên bản xử lý tranh chấp (ít nhất 10 ký tự).'
-  );
-  const update = {
-    resolutionAction: action,
-    resolutionNote: note,
-    lastActionAt: new Date(),
-  };
-  if (action !== 'FREEZE_ESCROW') {
-    update.status = 'RESOLVED';
-    update.resolvedAt = new Date();
-    update.resolvedBy = options.adminUserId;
-  }
-  const r = await Report.findByIdAndUpdate(reportId, update, { new: true });
-  if (!r) {
+  const actionLabel = action === 'REFUND' ? 'Hoàn tiền' : 'Chi trả';
+  const note = ensureReason(options.reason, 1, 'Vui lòng nhập biên bản xử lý tranh chấp.');
+
+  const r0 = await Report.findById(reportId);
+  if (!r0) {
     const err = new Error('Không tìm thấy báo cáo.');
     err.status = 404;
     throw err;
   }
-  const summary = `Báo cáo của bạn đã được admin xử lý với hành động: ${action}.`;
+  if (r0.status === 'RESOLVED') {
+    const err = new Error('Báo cáo này đã được xử lý trước đó.');
+    err.status = 409;
+    throw err;
+  }
+  const bookingId = r0.relatedBookingId;
+  if (!bookingId) {
+    const err = new Error('Báo cáo không gắn với đơn booking nên không thể quyết toán.');
+    err.status = 400;
+    throw err;
+  }
+
+  const booking = await Booking.findById(bookingId).select('customer companion holdAmount status').lean();
+  if (!booking) {
+    const err = new Error('Không tìm thấy đơn booking liên quan.');
+    err.status = 404;
+    throw err;
+  }
+  const bookingStatus = String(booking.status || '').toUpperCase();
+  if (!['IN_PROGRESS', 'COMPLETED'].includes(bookingStatus)) {
+    const err = new Error('Chỉ xử lý tranh chấp cho đơn đang diễn ra (IN_PROGRESS) hoặc đã kết thúc (COMPLETED).');
+    err.status = 409;
+    throw err;
+  }
+
+  const existingSettlement = await WalletTransaction.exists({
+    booking: bookingId,
+    type: { $in: ['REFUND', 'PAYOUT'] },
+  });
+  if (existingSettlement) {
+    const err = new Error('Đơn này đã có giao dịch hoàn/chi trước đó. Không thể thực hiện lại.');
+    err.status = 409;
+    throw err;
+  }
+
+  const gross = decimal128ToBigInt(booking.holdAmount);
+  if (gross <= 0n) {
+    const err = new Error('Đơn không có số tiền ký quỹ để xử lý.');
+    err.status = 400;
+    throw err;
+  }
+
+  const settings = await getOrCreateSettings();
+  const rate = settings.commissionRate ?? 0.15;
+  const commission = BigInt(Math.max(0, Math.round(Number(gross) * rate)));
+  const net = gross > commission ? gross - commission : 0n;
+
+  if (action === 'REFUND') {
+    if (bookingStatus === 'IN_PROGRESS') {
+      // Đơn đang diễn ra: hoàn trực tiếp từ tiền cọc (escrow/holdAmount).
+      const customer = await User.findById(booking.customer);
+      if (!customer) {
+        const err = new Error('Không tìm thấy khách hàng để hoàn tiền.');
+        err.status = 500;
+        throw err;
+      }
+      const bal = decimal128ToBigInt(customer.balance);
+      customer.balance = bigIntToDecimal128(bal + gross);
+      await customer.save();
+      await WalletTransaction.create({
+        user: booking.customer,
+        booking: bookingId,
+        amount: bigIntToDecimal128(gross),
+        type: 'REFUND',
+        provider: 'DISPUTE',
+        description: `Hoàn tiền từ cọc theo tranh chấp #${String(r0._id)}`,
+      });
+      void notifyWalletMutation({
+        userId: booking.customer,
+        type: 'REFUND',
+        amountVnd: gross,
+        bookingId,
+        provider: 'DISPUTE',
+        description: `Hoàn tiền từ cọc theo tranh chấp #${String(r0._id)}`,
+      });
+    } else {
+      // Đơn đã kết thúc: tiền đã vào ví companion (net). Hoàn ngược bằng cách trừ ví companion và cộng cho customer.
+      if (net <= 0n) {
+        const err = new Error('Số tiền sau hoa hồng không hợp lệ để hoàn ngược.');
+        err.status = 400;
+        throw err;
+      }
+      const comp = await Companion.findById(booking.companion).select('user').lean();
+      const companionUserId = comp?.user;
+      if (!companionUserId) {
+        const err = new Error('Không tìm thấy user của companion để hoàn ngược.');
+        err.status = 500;
+        throw err;
+      }
+      const cu = await User.findById(companionUserId);
+      const customer = await User.findById(booking.customer);
+      if (!cu || !customer) {
+        const err = new Error('Không tìm thấy ví để hoàn ngược.');
+        err.status = 500;
+        throw err;
+      }
+      const cBal = decimal128ToBigInt(cu.balance);
+      if (cBal < net) {
+        const err = new Error('Số dư companion không đủ để hoàn ngược theo tranh chấp.');
+        err.status = 409;
+        throw err;
+      }
+      cu.balance = bigIntToDecimal128(cBal - net);
+      await cu.save();
+      await WalletTransaction.create({
+        user: companionUserId,
+        booking: bookingId,
+        amount: bigIntToDecimal128(net),
+        type: 'CHARGE',
+        provider: 'DISPUTE',
+        description: `Trừ tiền hoàn ngược theo tranh chấp #${String(r0._id)}`,
+      });
+      void notifyWalletMutation({
+        userId: companionUserId,
+        type: 'CHARGE',
+        amountVnd: net,
+        bookingId,
+        provider: 'DISPUTE',
+        description: `Trừ tiền hoàn ngược theo tranh chấp #${String(r0._id)}`,
+      });
+
+      const uBal = decimal128ToBigInt(customer.balance);
+      customer.balance = bigIntToDecimal128(uBal + net);
+      await customer.save();
+      await WalletTransaction.create({
+        user: booking.customer,
+        booking: bookingId,
+        amount: bigIntToDecimal128(net),
+        type: 'REFUND',
+        provider: 'DISPUTE',
+        description: `Hoàn ngược từ ví companion theo tranh chấp #${String(r0._id)}`,
+      });
+      void notifyWalletMutation({
+        userId: booking.customer,
+        type: 'REFUND',
+        amountVnd: net,
+        bookingId,
+        provider: 'DISPUTE',
+        description: `Hoàn ngược từ ví companion theo tranh chấp #${String(r0._id)}`,
+      });
+    }
+  } else {
+    // PAYOUT
+    if (bookingStatus === 'IN_PROGRESS') {
+      // Đơn đang diễn ra: chi trả sớm từ tiền cọc (net) vào ví companion.
+      if (net <= 0n) {
+        const err = new Error('Số tiền sau hoa hồng không hợp lệ để chi trả.');
+        err.status = 400;
+        throw err;
+      }
+      const comp = await Companion.findById(booking.companion).select('user').lean();
+      const companionUserId = comp?.user;
+      if (!companionUserId) {
+        const err = new Error('Không tìm thấy user của companion để chi trả.');
+        err.status = 500;
+        throw err;
+      }
+      const cu = await User.findById(companionUserId);
+      if (!cu) {
+        const err = new Error('Không tìm thấy ví của companion để chi trả.');
+        err.status = 500;
+        throw err;
+      }
+      const bal = decimal128ToBigInt(cu.balance);
+      cu.balance = bigIntToDecimal128(bal + net);
+      await cu.save();
+      await WalletTransaction.create({
+        user: companionUserId,
+        booking: bookingId,
+        amount: bigIntToDecimal128(net),
+        type: 'PAYOUT',
+        provider: 'DISPUTE',
+        description: `Chi trả từ cọc theo tranh chấp #${String(r0._id)} (sau hoa hồng)`,
+      });
+      void notifyWalletMutation({
+        userId: companionUserId,
+        type: 'PAYOUT',
+        amountVnd: net,
+        bookingId,
+        provider: 'DISPUTE',
+        description: `Chi trả từ cọc theo tranh chấp #${String(r0._id)} (sau hoa hồng)`,
+      });
+    } else {
+      // Đơn đã kết thúc: payout đã được quyết toán lúc check-out, nên không chi lại.
+      // Chỉ cập nhật biên bản/RESOLVED.
+    }
+  }
+
+  const update = {
+    status: 'RESOLVED',
+    resolutionAction: action,
+    resolutionNote: note,
+    lastActionAt: new Date(),
+    resolvedAt: new Date(),
+    resolvedBy: options.adminUserId,
+  };
+  const r = await Report.findByIdAndUpdate(reportId, update, { new: true });
+
+  const summary = `Báo cáo của bạn đã được admin xử lý với hành động: ${actionLabel}.`;
   const detail = `${summary}\nBiên bản: ${note}`;
   await Promise.all([
     notifyUser(r.reporter, 'Cập nhật xử lý tranh chấp', detail),

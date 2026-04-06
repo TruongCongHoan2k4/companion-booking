@@ -202,7 +202,7 @@ function ensureReasonModal() {
   return modalEl;
 }
 
-function askReasonModal({ title, hint, placeholder, minLength = 8, required = true, submitText = 'Xác nhận' }) {
+function askReasonModal({ title, hint, placeholder, minLength = 0, required = true, submitText = 'Xác nhận' }) {
   if (typeof bootstrap === 'undefined') {
     showAlert('Thiếu Bootstrap để mở form nhập lý do.', 'danger');
     return Promise.resolve(null);
@@ -217,7 +217,8 @@ function askReasonModal({ title, hint, placeholder, minLength = 8, required = tr
   const formEl = modalEl.querySelector('#admin-reason-form');
 
   titleEl.textContent = title || 'Nhập lý do';
-  hintEl.textContent = hint || (required ? `Vui lòng nhập nội dung (tối thiểu ${minLength} ký tự).` : 'Bạn có thể để trống.');
+  hintEl.textContent =
+    hint || (required ? 'Vui lòng nhập nội dung.' : 'Bạn có thể để trống.');
   inputEl.value = '';
   inputEl.placeholder = placeholder || 'Nhập nội dung...';
   submitEl.textContent = submitText;
@@ -257,7 +258,7 @@ function askReasonModal({ title, hint, placeholder, minLength = 8, required = tr
         resolve('');
         return;
       }
-      if (trimmed.length < minLength) {
+      if (minLength > 0 && trimmed.length < minLength) {
         errorEl.textContent = `Nội dung tối thiểu ${minLength} ký tự.`;
         errorEl.style.display = '';
         inputEl.focus();
@@ -720,7 +721,6 @@ async function moderateCompanion(id, isApprove, tableBodyId) {
     const r = await askReasonModal({
       title: 'Từ chối hồ sơ Companion',
       hint: 'Nhập lý do từ chối để Companion biết cần bổ sung gì.',
-      minLength: 10,
       required: true,
       submitText: 'Từ chối',
     });
@@ -798,7 +798,6 @@ async function updateUserFlag(userId, action) {
     successMessage = 'Đã cảnh cáo tài khoản.';
     const r = await askReasonModal({
       title: 'Cảnh cáo người dùng',
-      minLength: 8,
       required: true,
       submitText: 'Cảnh cáo',
     });
@@ -816,7 +815,6 @@ async function updateUserFlag(userId, action) {
     successMessage = 'Đã khôi phục trạng thái bình thường cho tài khoản.';
     const r = await askReasonModal({
       title: 'Ghi chú khôi phục trạng thái (không bắt buộc)',
-      minLength: 5,
       required: false,
       submitText: 'Khôi phục',
     });
@@ -825,7 +823,6 @@ async function updateUserFlag(userId, action) {
   } else {
     const r = await askReasonModal({
       title: 'Khóa tài khoản người dùng',
-      minLength: 8,
       required: true,
       submitText: 'Khóa',
     });
@@ -877,7 +874,6 @@ async function loadModerationPage(keyword) {
 async function hideReview(reviewId, button) {
   const reason = await askReasonModal({
     title: 'Ẩn review vi phạm',
-    minLength: 8,
     required: true,
     submitText: 'Ẩn review',
   });
@@ -945,7 +941,6 @@ async function reviewWithdrawal(id, approve, button) {
   if (approve) {
     const r = await askReasonModal({
       title: 'Ghi chú duyệt lệnh rút (không bắt buộc)',
-      minLength: 5,
       required: false,
       submitText: 'Duyệt',
     });
@@ -954,7 +949,6 @@ async function reviewWithdrawal(id, approve, button) {
   } else {
     const r = await askReasonModal({
       title: 'Từ chối lệnh rút tiền',
-      minLength: 8,
       required: true,
       submitText: 'Từ chối',
     });
@@ -1003,10 +997,8 @@ async function loadDisputesPage() {
             </td>
             <td><span class="badge ${dispute.status === 'RESOLVED' ? 'text-bg-success' : dispute.emergency ? 'text-bg-danger' : 'text-bg-warning'}">${escapeHtml(dispute.status)}</span></td>
             <td class="action-group">
-                <button type="button" class="btn btn-sm btn-secondary" data-action="freeze" data-report-id="${dispute.id}" ${canAct ? '' : 'disabled'}>Đóng băng ký quỹ</button>
                 <button type="button" class="btn btn-sm btn-outline-primary" data-action="refund" data-report-id="${dispute.id}" ${canAct ? '' : 'disabled'}>Hoàn tiền</button>
                 <button type="button" class="btn btn-sm btn-outline-success" data-action="payout" data-report-id="${dispute.id}" ${canAct ? '' : 'disabled'}>Thanh toán</button>
-                <button type="button" class="btn btn-sm btn-dark" data-action="close" data-report-id="${dispute.id}" ${canAct ? '' : 'disabled'}>Đóng hồ sơ</button>
             </td>
         `;
     tbody.appendChild(tr);
@@ -1023,10 +1015,8 @@ async function loadDisputesPage() {
 
 async function processDispute(id, action, button) {
   const map = {
-    freeze: 'freeze-escrow',
     refund: 'refund',
     payout: 'payout',
-    close: 'close',
   };
   const endpoint = map[action];
   if (!id || !endpoint) {
@@ -1036,7 +1026,6 @@ async function processDispute(id, action, button) {
   const reason = await askReasonModal({
     title: 'Biên bản xử lý tranh chấp',
     hint: 'Ghi rõ bằng chứng, quyết định, và hướng xử lý cho các bên.',
-    minLength: 10,
     required: true,
     submitText: 'Xác nhận xử lý',
   });

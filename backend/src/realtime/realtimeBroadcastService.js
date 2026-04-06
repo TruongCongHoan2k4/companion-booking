@@ -6,6 +6,7 @@ import { assertBookingParticipant } from '../services/bookingAccess.service.js';
 let io;
 
 const COOKIE_NAME = 'accessToken';
+const CHAT_ALLOWED_STATUSES = new Set(['ACCEPTED', 'IN_PROGRESS']);
 
 function getTokenFromHandshake(handshake) {
   const auth = handshake.auth?.token;
@@ -114,6 +115,14 @@ export function initRealtime(server) {
         const gate = await assertBookingParticipant(bookingId, uid);
         if (!gate.ok) {
           ack?.({ ok: false, message: gate.message });
+          return;
+        }
+        const status = String(gate.booking?.status || '').toUpperCase();
+        if (!CHAT_ALLOWED_STATUSES.has(status)) {
+          ack?.({
+            ok: false,
+            message: `Chat chỉ mở khi đơn ở trạng thái ACCEPTED/IN_PROGRESS. Trạng thái hiện tại: ${gate.booking?.status || '-'}`,
+          });
           return;
         }
 

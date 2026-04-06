@@ -6,6 +6,7 @@ import WalletTransaction from '../models/walletTransaction.model.js';
 import ServicePrice from '../models/servicePrice.model.js';
 import PlatformSettings from '../models/platformSettings.model.js';
 import * as bookingNotify from './bookingNotify.service.js';
+import { notifyWalletMutation } from './walletNotify.service.js';
 import {
   bigIntToDecimal128,
   decimal128ToBigInt,
@@ -76,6 +77,12 @@ export async function createBooking(customerUserId, payload) {
       err.status = 400;
       throw err;
     }
+    if (!companion.onlineStatus) {
+      const err = new Error('Companion đang offline, vui lòng chọn companion online để đặt lịch.');
+      err.status = 400;
+      err.code = 'COMPANION_OFFLINE';
+      throw err;
+    }
 
     let priceDec = companion.pricePerHour;
     let serviceName = payload.serviceName || undefined;
@@ -142,6 +149,14 @@ export async function createBooking(customerUserId, payload) {
       type: 'HOLD',
       description: 'Giữ cọc đặt lịch (chờ companion xác nhận)',
     });
+    void notifyWalletMutation({
+      userId: customerUserId,
+      type: 'HOLD',
+      amountVnd: holdBig,
+      bookingId: booking._id,
+      provider: 'BOOKING',
+      description: 'Giữ cọc đặt lịch (chờ companion xác nhận)',
+    });
 
     return serializeBooking(booking);
   }
@@ -158,6 +173,12 @@ export async function createBooking(customerUserId, payload) {
     if (companion.status !== 'APPROVED') {
       const err = new Error('Companion chưa được duyệt hoặc không khả dụng.');
       err.status = 400;
+      throw err;
+    }
+    if (!companion.onlineStatus) {
+      const err = new Error('Companion đang offline, vui lòng chọn companion online để đặt lịch.');
+      err.status = 400;
+      err.code = 'COMPANION_OFFLINE';
       throw err;
     }
 
@@ -235,6 +256,14 @@ export async function createBooking(customerUserId, payload) {
       ],
       { session }
     );
+    void notifyWalletMutation({
+      userId: customerUserId,
+      type: 'HOLD',
+      amountVnd: holdBig,
+      bookingId: booking._id,
+      provider: 'BOOKING',
+      description: 'Giữ cọc đặt lịch (chờ companion xác nhận)',
+    });
 
     await session.commitTransaction();
     return serializeBooking(booking);
@@ -300,6 +329,14 @@ export async function workflowBooking(companionDocId, bookingId, action) {
           type: 'REFUND',
           description: 'Hoàn cọc — companion từ chối đơn',
         });
+        void notifyWalletMutation({
+          userId: booking.customer,
+          type: 'REFUND',
+          amountVnd: refund,
+          bookingId: booking._id,
+          provider: 'BOOKING',
+          description: 'Hoàn cọc — companion từ chối đơn',
+        });
       }
       return serializeBooking(booking);
     }
@@ -361,6 +398,14 @@ export async function workflowBooking(companionDocId, bookingId, action) {
           ],
           { session }
         );
+        void notifyWalletMutation({
+          userId: booking.customer,
+          type: 'REFUND',
+          amountVnd: refund,
+          bookingId: booking._id,
+          provider: 'BOOKING',
+          description: 'Hoàn cọc — companion từ chối đơn',
+        });
       }
     }
 
@@ -494,6 +539,14 @@ export async function checkOutBooking(userId, role, bookingId) {
           provider: 'BOOKING',
           description: `Thanh toán booking #${String(booking._id)} (sau hoa hồng)`,
         });
+        void notifyWalletMutation({
+          userId: companionUserId,
+          type: 'PAYOUT',
+          amountVnd: net,
+          bookingId: booking._id,
+          provider: 'BOOKING',
+          description: `Thanh toán booking #${String(booking._id)} (sau hoa hồng)`,
+        });
       }
     }
   } catch (e) {
@@ -550,6 +603,17 @@ export async function cancelBooking(userId, role, bookingId) {
       booking: booking._id,
       amount: bigIntToDecimal128(refund),
       type: 'REFUND',
+      description:
+        refund === hold
+          ? 'Hoàn cọc 100% — hủy trước 24h'
+          : 'Hoàn cọc 50% — hủy trong 6–24h trước giờ hẹn',
+    });
+    void notifyWalletMutation({
+      userId: booking.customer,
+      type: 'REFUND',
+      amountVnd: refund,
+      bookingId: booking._id,
+      provider: 'BOOKING',
       description:
         refund === hold
           ? 'Hoàn cọc 100% — hủy trước 24h'
@@ -657,6 +721,14 @@ export async function companionDecideExtension(companionUserId, bookingId, decis
         booking: booking._id,
         amount: bigIntToDecimal128(extraHold),
         type: 'HOLD',
+        provider: 'EXTENSION',
+        description: `Giữ cọc gia hạn +${pending} phút cho booking #${String(booking._id)}`,
+      });
+      void notifyWalletMutation({
+        userId: booking.customer,
+        type: 'HOLD',
+        amountVnd: extraHold,
+        bookingId: booking._id,
         provider: 'EXTENSION',
         description: `Giữ cọc gia hạn +${pending} phút cho booking #${String(booking._id)}`,
       });

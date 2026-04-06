@@ -7,6 +7,17 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" />
     <link rel="stylesheet" href="../../public/css/user.css" />
+    <style>
+      body[data-page='report'] {
+        background-color: transparent !important;
+        background-image: linear-gradient(rgba(248, 250, 252, 0.80), rgba(241, 245, 249, 0.74)),
+          url('../../public/img/bg-user-report-unsplash.jpg');
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        min-height: 100vh;
+      }
+    </style>
   </head>
   <body data-page="report" class="bg-light">
     <nav class="navbar navbar-expand-lg bg-white border-bottom">
@@ -47,17 +58,14 @@
               </div>
               <form id="report-form" class="row g-3">
                 <div class="col-12">
-                  <label for="reportedUserId" class="form-label">
-                    <i class="bi bi-person-x me-1"></i>
-                    ID user bị tố cáo
+                  <label for="report-booking-select" class="form-label">
+                    <i class="bi bi-receipt-cutoff me-1"></i>
+                    Chọn đơn liên quan
                   </label>
-                  <input
-                    id="reportedUserId"
-                    type="text"
-                    class="form-control"
-                    placeholder="Nhập ID"
-                    required
-                  />
+                  <select id="report-booking-select" class="form-select" required></select>
+                  <div class="form-text small">
+                    Tố cáo chỉ được gửi theo từng đơn vì liên quan hoàn tiền/thanh toán. Người bị tố cáo sẽ được hệ thống tự xác định từ đơn.
+                  </div>
                 </div>
                 <div class="col-12">
                   <label for="reportCategory" class="form-label">

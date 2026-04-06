@@ -8,6 +8,7 @@ import WalletTransaction from '../models/walletTransaction.model.js';
 import PlatformSettings from '../models/platformSettings.model.js';
 import { serializeBooking, workflowBooking, companionDecideExtension } from './booking.service.js';
 import { bigIntToDecimal128, decimal128ToBigInt } from '../utils/money.util.js';
+import { notifyWalletMutation } from './walletNotify.service.js';
 
 function decToNumber(d) {
   if (d == null) return 0;
@@ -399,6 +400,13 @@ export async function createWithdrawal(companionDoc, body) {
       provider: 'WITHDRAWAL',
       description: `Tạo lệnh rút tiền #${String(w._id)}`,
     });
+    void notifyWalletMutation({
+      userId: companionUserId,
+      type: 'CHARGE',
+      amountVnd: amount,
+      provider: 'WITHDRAWAL',
+      description: `Tạo lệnh rút tiền #${String(w._id)}`,
+    });
 
     return true;
   }
@@ -458,6 +466,13 @@ export async function createWithdrawal(companionDoc, body) {
       ],
       { session }
     );
+    void notifyWalletMutation({
+      userId: companionUserId,
+      type: 'CHARGE',
+      amountVnd: amount,
+      provider: 'WITHDRAWAL',
+      description: `Tạo lệnh rút tiền #${String(w._id)}`,
+    });
 
     await session.commitTransaction();
     return true;

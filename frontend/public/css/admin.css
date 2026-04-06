@@ -3,8 +3,7 @@
 :root {
     --a-primary: #3b82f6;
     --a-primary-light: #60a5fa;
-    --a-sidebar-bg: linear-gradient(180deg, rgba(15, 23, 42, 0.72) 0%, rgba(30, 41, 59, 0.8) 100%);
-    --a-sidebar-bg-image: url('../img/admin-sidebar.jpg');
+    --a-sidebar-bg: linear-gradient(180deg, rgba(15, 23, 42, 0.55) 0%, rgba(30, 41, 59, 0.65) 100%);
     --a-sidebar-hover: rgba(255, 255, 255, 0.06);
     --a-sidebar-active: linear-gradient(135deg, #3b82f6, #6366f1);
     --a-topbar-bg: #ffffff;
@@ -39,10 +38,6 @@ body {
 
 .admin-sidebar {
     width: 270px;
-    background-image: var(--a-sidebar-bg), var(--a-sidebar-bg-image);
-    background-size: cover;
-    background-position: center;
-    background-repeat: no-repeat;
     color: #fff;
     padding: 1.25rem;
     position: sticky;
@@ -237,6 +232,8 @@ body {
     display: flex;
     flex-wrap: wrap;
     gap: 0.35rem;
+    align-items: center;
+    align-content: center;
 }
 
 .table {

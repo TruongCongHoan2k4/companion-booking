@@ -57,15 +57,6 @@ router.post(
 
 router.get('/disputes', adminController.disputesList);
 router.post(
-  '/disputes/:id/freeze-escrow',
-  validateMongoIdParam('id'),
-  (req, _res, next) => {
-    req.actionType = 'FREEZE_ESCROW';
-    next();
-  },
-  adminController.disputeAction
-);
-router.post(
   '/disputes/:id/refund',
   validateMongoIdParam('id'),
   (req, _res, next) => {
@@ -79,15 +70,6 @@ router.post(
   validateMongoIdParam('id'),
   (req, _res, next) => {
     req.actionType = 'PAYOUT';
-    next();
-  },
-  adminController.disputeAction
-);
-router.post(
-  '/disputes/:id/close',
-  validateMongoIdParam('id'),
-  (req, _res, next) => {
-    req.actionType = 'CLOSE';
     next();
   },
   adminController.disputeAction

@@ -50,8 +50,8 @@ export async function notifyBookingWorkflow(booking, action) {
       action === 'ACCEPT' ? 'Đơn đã được chấp nhận' : 'Đơn bị từ chối';
     const content =
       action === 'ACCEPT'
-        ? `Companion đã chấp nhận đơn #${bid}.`
-        : `Companion đã từ chối đơn #${bid}. Cọc đã hoàn về ví (nếu có).`;
+        ? 'Companion đã chấp nhận đơn của bạn.'
+        : 'Companion đã từ chối đơn của bạn. Tiền cọc sẽ được hoàn về ví (nếu có).';
 
     await notify(customerId, title, content);
 
@@ -97,7 +97,7 @@ export async function notifyCheckInConfirmed(booking) {
     const customerId = booking.customer?.toString?.() ?? booking.customer;
     const companionUserId = await resolveCompanionUserId(booking.companion);
     await Promise.all([
-      notify(customerId, 'Check-in đã được xác nhận', `Booking #${bid} đã check-in, phiên bắt đầu.`),
+      notify(customerId, 'Check-in đã được xác nhận', 'Đã xác nhận check-in, phiên bắt đầu.'),
       companionUserId
         ? notify(companionUserId, 'Check-in đã được xác nhận', `Booking #${bid} đã check-in, phiên bắt đầu.`)
         : Promise.resolve(),
@@ -144,7 +144,7 @@ export async function notifyCheckOutConfirmed(booking) {
     const customerId = booking.customer?.toString?.() ?? booking.customer;
     const companionUserId = await resolveCompanionUserId(booking.companion);
     await Promise.all([
-      notify(customerId, 'Check-out đã được xác nhận', `Booking #${bid} đã check-out, đơn đã hoàn tất.`),
+      notify(customerId, 'Check-out đã được xác nhận', 'Đã xác nhận check-out, đơn đã hoàn tất.'),
       companionUserId
         ? notify(companionUserId, 'Check-out đã được xác nhận', `Booking #${bid} đã check-out, đơn đã hoàn tất.`)
         : Promise.resolve(),
@@ -169,7 +169,7 @@ export async function notifyExtensionRequested(booking) {
     if (!companionUserId) return;
     const extra = Number(booking.pendingExtensionMinutes || 0);
     const title = 'Yêu cầu gia hạn';
-    const content = `Khách hàng xin gia hạn ${extra || 30} phút cho đơn #${bid}. Vui lòng phản hồi.`;
+    const content = `Khách hàng xin gia hạn thêm ${extra || 30} phút. Vui lòng phản hồi.`;
     await notify(companionUserId, title, content);
 
     publishBookingStatusToRoom(bid, {

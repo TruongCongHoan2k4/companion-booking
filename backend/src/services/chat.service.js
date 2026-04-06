@@ -4,6 +4,18 @@ import Booking from '../models/booking.model.js';
 import Companion from '../models/companion.model.js';
 import User from '../models/user.model.js';
 
+const CHAT_ALLOWED_STATUSES = new Set(['ACCEPTED', 'IN_PROGRESS']);
+
+function assertChatAllowedToSend(booking) {
+  const status = String(booking?.status || '').toUpperCase();
+  if (CHAT_ALLOWED_STATUSES.has(status)) return;
+  const err = new Error(
+    `Chat chỉ mở khi đơn ở trạng thái ACCEPTED/IN_PROGRESS. Trạng thái hiện tại: ${booking?.status || '-'}`
+  );
+  err.status = 409;
+  throw err;
+}
+
 function serializeMessage(row) {
   const o = row;
   const sender = o.sender;
@@ -41,6 +53,7 @@ export async function createMessageForUser(bookingId, userId, content) {
     err.status = gate.status;
     throw err;
   }
+  assertChatAllowedToSend(gate.booking);
   const text = String(content || '').trim();
   if (!text) {
     const err = new Error('Nội dung tin nhắn không được để trống.');
