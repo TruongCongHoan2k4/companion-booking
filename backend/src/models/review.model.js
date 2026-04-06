@@ -17,6 +17,10 @@ const reviewSchema = new mongoose.Schema(
     comment: {
       type: String,
     },
+    hidden: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: { createdAt: true, updatedAt: false }, // chỉ tạo createdAt giống LocalDateTime.now()

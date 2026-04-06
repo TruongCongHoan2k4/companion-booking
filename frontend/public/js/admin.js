@@ -891,12 +891,12 @@ function processAdminRealtimeNotifications(list) {
     (a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0)
   );
   if (!adminRealtimeNotifState.initialized) {
-    sorted.forEach((n) => adminRealtimeNotifState.seenIds.add(Number(n.id)));
+    sorted.forEach((n) => adminRealtimeNotifState.seenIds.add(String(n.id)));
     adminRealtimeNotifState.initialized = true;
     return;
   }
   sorted.forEach((n) => {
-    const id = Number(n.id);
+    const id = String(n.id);
     if (!adminRealtimeNotifState.seenIds.has(id)) {
       adminRealtimeNotifState.seenIds.add(id);
       if (isSosNotification(n)) {

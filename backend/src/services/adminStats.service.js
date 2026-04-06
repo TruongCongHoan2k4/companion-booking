@@ -26,46 +26,55 @@ export async function getDashboardStats() {
   const now = new Date();
   const rangeStart = new Date(now.getFullYear(), now.getMonth() - 11, 1);
 
-  const [bookingByMonth, chargeByMonth, totalBookings, totalChargeRevenue, totalDeposits] =
-    await Promise.all([
-      Booking.aggregate([
-        { $match: { createdAt: { $gte: rangeStart } } },
-        {
-          $group: {
-            _id: {
-              $dateToString: { format: '%Y-%m', date: '$createdAt' },
-            },
-            orderCount: { $sum: 1 },
+  const [
+    bookingByMonth,
+    chargeByMonth,
+    totalBookings,
+    totalChargeRevenue,
+    totalDeposits,
+    cancelledBookings,
+    totalTransactions,
+  ] = await Promise.all([
+    Booking.aggregate([
+      { $match: { createdAt: { $gte: rangeStart } } },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: '%Y-%m', date: '$createdAt' },
           },
+          orderCount: { $sum: 1 },
         },
-        { $sort: { _id: 1 } },
-      ]),
-      WalletTransaction.aggregate([
-        {
-          $match: {
-            type: 'CHARGE',
-            createdAt: { $gte: rangeStart },
+      },
+      { $sort: { _id: 1 } },
+    ]),
+    WalletTransaction.aggregate([
+      {
+        $match: {
+          type: 'CHARGE',
+          createdAt: { $gte: rangeStart },
+        },
+      },
+      {
+        $addFields: {
+          amt: { $toDouble: { $toString: '$amount' } },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: '%Y-%m', date: '$createdAt' },
           },
+          revenueVnd: { $sum: '$amt' },
         },
-        {
-          $addFields: {
-            amt: { $toDouble: { $toString: '$amount' } },
-          },
-        },
-        {
-          $group: {
-            _id: {
-              $dateToString: { format: '%Y-%m', date: '$createdAt' },
-            },
-            revenueVnd: { $sum: '$amt' },
-          },
-        },
-        { $sort: { _id: 1 } },
-      ]),
-      Booking.countDocuments(),
-      sumWalletByType('CHARGE'),
-      sumWalletByType('DEPOSIT'),
-    ]);
+      },
+      { $sort: { _id: 1 } },
+    ]),
+    Booking.countDocuments(),
+    sumWalletByType('CHARGE'),
+    sumWalletByType('DEPOSIT'),
+    Booking.countDocuments({ status: 'CANCELLED' }),
+    WalletTransaction.countDocuments(),
+  ]);
 
   const orderMap = new Map(bookingByMonth.map((x) => [x._id, x.orderCount]));
   const revenueMap = new Map(
@@ -90,5 +99,9 @@ export async function getDashboardStats() {
       totalDepositsVnd: totalDeposits,
     },
     byMonth,
+    /** Khớp trang admin dashboard (public/js/admin.js). */
+    platformProfit: totalChargeRevenue,
+    totalTransactions,
+    cancelledBookings,
   };
 }
