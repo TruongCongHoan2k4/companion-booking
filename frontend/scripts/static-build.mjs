@@ -1,5 +1,5 @@
 /**
- * Sau `vite build` (bundle auth.html → dist), copy site tĩnh (HTML + public + pages) vào dist (merge).
+ * Gộp site tĩnh (HTML + public + pages) vào dist/ để deploy.
  */
 import fs from 'fs';
 import path from 'path';
@@ -24,4 +24,4 @@ for (const name of toCopy) {
   }
 }
 
-console.log('static-build: merged static assets into', dist);
+console.log('static-build: copied static site to', dist);

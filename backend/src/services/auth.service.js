@@ -107,3 +107,35 @@ export const getMePayload = async (userId) => {
     isAdmin: user.role === 'ADMIN',
   };
 };
+
+export const patchMyAccount = async (userId, { fullName }) => {
+  const user = await User.findById(userId);
+  if (!user) {
+    const err = new Error('Không tìm thấy người dùng.');
+    err.status = 404;
+    throw err;
+  }
+  if (fullName !== undefined) {
+    const t = fullName == null ? '' : String(fullName).trim();
+    user.fullName = t || undefined;
+  }
+  await user.save();
+  return toPlainUser(user);
+};
+
+export const changePassword = async (userId, { currentPassword, newPassword }) => {
+  const user = await User.findById(userId).select('+password');
+  if (!user) {
+    const err = new Error('Không tìm thấy người dùng.');
+    err.status = 404;
+    throw err;
+  }
+  const ok = await bcrypt.compare(currentPassword, user.password);
+  if (!ok) {
+    const err = new Error('Mật khẩu hiện tại không đúng.');
+    err.status = 401;
+    throw err;
+  }
+  user.password = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  await user.save();
+};

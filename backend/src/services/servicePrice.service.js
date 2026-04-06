@@ -6,6 +6,9 @@ function serialize(doc) {
   if (o.pricePerHour != null && o.pricePerHour.toString) {
     o.pricePerHour = o.pricePerHour.toString();
   }
+  if (o._id) {
+    o.id = String(o._id);
+  }
   return o;
 }
 

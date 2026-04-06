@@ -88,3 +88,23 @@ export const logout = async (req, res) => {
     res.status(500).json({ message: err.message || 'Đăng xuất thất bại.' });
   }
 };
+
+export const patchMe = async (req, res) => {
+  try {
+    const user = await authService.patchMyAccount(req.auth.userId, req.body || {});
+    res.json({ message: 'Đã cập nhật thông tin tài khoản.', user });
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({ message: err.message || 'Cập nhật thất bại.' });
+  }
+};
+
+export const changePassword = async (req, res) => {
+  try {
+    await authService.changePassword(req.auth.userId, req.body || {});
+    res.json({ message: 'Đã đổi mật khẩu thành công.' });
+  } catch (err) {
+    const status = err.status || 500;
+    res.status(status).json({ message: err.message || 'Đổi mật khẩu thất bại.' });
+  }
+};

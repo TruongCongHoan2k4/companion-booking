@@ -17,7 +17,7 @@ Cypress.Commands.add('login', (username, password) => {
     const token = body.token;
     const user = body.user;
     expect(token, 'response.token').to.be.a('string').and.not.be.empty;
-    cy.visit('/auth.html#/wallet-bookings', {
+    cy.visit('/pages/user/wallet.html', {
       onBeforeLoad(win) {
         win.localStorage.setItem('token', token);
         if (user?.role) win.localStorage.setItem('role', user.role);

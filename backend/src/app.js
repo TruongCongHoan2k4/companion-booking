@@ -8,6 +8,7 @@ import companionRoute from './routes/companion.route.js';
 import walletRoute from './routes/wallet.route.js';
 import bookingRoute from './routes/booking.route.js';
 import adminRoute from './routes/admin.route.js';
+import companionNotifyRoute from './routes/companionNotify.route.js';
 import { configureCloudinary } from './config/cloudinary.config.js';
 import { errorHandler } from './middleware/errorHandler.middleware.js';
 
@@ -30,6 +31,7 @@ app.use(express.json());
 app.use('/api/auth', authRoute);
 app.use('/api/users', userRoute);
 app.use('/api/companions', companionRoute);
+app.use('/api/companion', companionNotifyRoute);
 app.use('/api/wallet', walletRoute);
 app.use('/api/bookings', bookingRoute);
 app.use('/api/admin', adminRoute);

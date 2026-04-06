@@ -23,7 +23,7 @@
             <p class="text-muted small">Đăng nhập để tiếp tục sử dụng dịch vụ</p>
           </div>
           <div id="auth-message" class="mb-3"></div>
-          <form id="login-form" class="row g-3">
+          <form id="login-form" class="row g-3" onsubmit="return AuthLogic.onLoginSubmit(event)">
             <div class="col-12">
               <label for="username" class="form-label">
                 <i class="bi bi-person me-1"></i>
@@ -34,6 +34,7 @@
                 id="username"
                 name="username"
                 class="form-control"
+                data-testid="login-username"
                 placeholder="Nhập tên đăng nhập"
                 required
               />
@@ -48,12 +49,13 @@
                 id="password"
                 name="password"
                 class="form-control"
+                data-testid="login-password"
                 placeholder="Nhập mật khẩu"
                 required
               />
             </div>
             <div class="col-12 d-grid mt-4">
-              <button type="submit" class="btn btn-primary btn-lg">
+              <button type="submit" class="btn btn-primary btn-lg" data-testid="login-submit">
                 <i class="bi bi-box-arrow-in-right me-2"></i>
                 Đăng nhập
               </button>
@@ -66,7 +68,11 @@
         </div>
       </div>
     </main>
-    <script src="../../public/js/realtime-stomp.js"></script>
-    <script src="../../public/js/user.js"></script>
+    <script src="../../public/js/auth-logic.js"></script>
+    <script>
+      document.addEventListener('DOMContentLoaded', function () {
+        if (window.AuthLogic && AuthLogic.initRegisteredBanner) AuthLogic.initRegisteredBanner();
+      });
+    </script>
   </body>
 </html>

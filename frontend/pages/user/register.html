@@ -23,7 +23,7 @@
             <p class="text-muted small">Đăng ký miễn phí để bắt đầu sử dụng</p>
           </div>
           <div id="auth-message" class="mb-3"></div>
-          <form id="register-form" class="row g-3">
+          <form id="register-form" class="row g-3" onsubmit="return AuthLogic.onRegisterSubmit(event)">
             <div class="col-12">
               <label for="username" class="form-label">
                 <i class="bi bi-person me-1"></i>
@@ -81,7 +81,6 @@
         </div>
       </div>
     </main>
-    <script src="../../public/js/realtime-stomp.js"></script>
-    <script src="../../public/js/user.js"></script>
+    <script src="../../public/js/auth-logic.js"></script>
   </body>
 </html>

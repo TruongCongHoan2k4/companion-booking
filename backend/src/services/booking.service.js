@@ -9,7 +9,7 @@ import {
   computeHoldAmountVnd,
 } from '../utils/money.util.js';
 
-function serializeBooking(doc) {
+export function serializeBooking(doc) {
   if (!doc) return doc;
   const o = typeof doc.toObject === 'function' ? doc.toObject() : { ...doc };
   ['servicePricePerHour', 'holdAmount'].forEach((k) => {

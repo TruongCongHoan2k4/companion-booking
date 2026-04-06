@@ -226,6 +226,364 @@ async function sendJson(url, method, payload) {
   });
 }
 
+const MAX_INTRO_MEDIA_FILES_PER_SAVE = 12;
+
+const companionProfileUploadState = {
+  identityFile: null,
+  portraitFile: null,
+  albumFiles: [],
+  retainedIntroUrls: [],
+  identityPreviewUrl: null,
+  portraitPreviewUrl: null,
+  albumPreviewUrls: [],
+  serverIdentityUrl: '',
+  serverPortraitUrl: '',
+};
+
+let companionProfileUploadInited = false;
+
+function splitIntroMediaUrlString(value) {
+  return String(value || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function revokeBlobUrl(url) {
+  if (url && String(url).startsWith('blob:')) {
+    try {
+      URL.revokeObjectURL(url);
+    } catch (_) {}
+  }
+}
+
+function refreshProfileLucideIcons() {
+  if (typeof lucide !== 'undefined' && typeof lucide.createIcons === 'function') {
+    lucide.createIcons();
+  }
+}
+
+function buildMediaThumb(url, mediaKind, onRemove) {
+  const box = document.createElement('div');
+  box.className = 'relative inline-block';
+  let mediaEl;
+  if (mediaKind === 'video') {
+    mediaEl = document.createElement('video');
+    mediaEl.src = url;
+    mediaEl.muted = true;
+    mediaEl.playsInline = true;
+    mediaEl.className = 'h-28 w-44 max-w-full rounded-lg border border-slate-200 object-cover shadow-sm';
+  } else {
+    mediaEl = document.createElement('img');
+    mediaEl.src = url;
+    mediaEl.alt = '';
+    mediaEl.className = 'h-28 max-h-32 w-auto max-w-[220px] rounded-lg border border-slate-200 object-cover shadow-sm';
+  }
+  box.appendChild(mediaEl);
+  if (typeof onRemove === 'function') {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className =
+      'absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-white bg-red-500 text-xs font-bold leading-none text-white shadow hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-300';
+    btn.setAttribute('aria-label', 'Xóa');
+    btn.textContent = '×';
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onRemove();
+    });
+    box.appendChild(btn);
+  }
+  return box;
+}
+
+function guessVideoUrl(u) {
+  return /\.(mp4|webm|mov)(\?|#|$)/i.test(u) || /\/video\//i.test(u);
+}
+
+function renderIdentityThumbPreview() {
+  const wrap = document.getElementById('identity-image-preview');
+  if (!wrap) return;
+  wrap.replaceChildren();
+  const st = companionProfileUploadState;
+  if (st.identityFile && st.identityPreviewUrl) {
+    wrap.appendChild(buildMediaThumb(st.identityPreviewUrl, 'image', clearIdentityUploadSelection));
+    return;
+  }
+  if (st.serverIdentityUrl) {
+    wrap.appendChild(buildMediaThumb(st.serverIdentityUrl, 'image', null));
+  }
+}
+
+function renderPortraitThumbPreview() {
+  const wrap = document.getElementById('portrait-image-preview');
+  if (!wrap) return;
+  wrap.replaceChildren();
+  const st = companionProfileUploadState;
+  if (st.portraitFile && st.portraitPreviewUrl) {
+    wrap.appendChild(buildMediaThumb(st.portraitPreviewUrl, 'image', clearPortraitUploadSelection));
+    return;
+  }
+  if (st.serverPortraitUrl) {
+    wrap.appendChild(buildMediaThumb(st.serverPortraitUrl, 'image', null));
+  }
+}
+
+function renderIntroAlbumPreview() {
+  const wrap = document.getElementById('intro-media-preview');
+  if (!wrap) return;
+  wrap.replaceChildren();
+  const st = companionProfileUploadState;
+  st.retainedIntroUrls.forEach((u, idx) => {
+    const kind = guessVideoUrl(u) ? 'video' : 'image';
+    wrap.appendChild(
+      buildMediaThumb(u, kind, () => {
+        st.retainedIntroUrls.splice(idx, 1);
+        renderIntroAlbumPreview();
+      })
+    );
+  });
+  st.albumFiles.forEach((file, idx) => {
+    const url = st.albumPreviewUrls[idx];
+    if (!url) return;
+    const kind = file.type.startsWith('video/') ? 'video' : 'image';
+    wrap.appendChild(
+      buildMediaThumb(url, kind, () => {
+        revokeBlobUrl(st.albumPreviewUrls[idx]);
+        st.albumPreviewUrls.splice(idx, 1);
+        st.albumFiles.splice(idx, 1);
+        renderIntroAlbumPreview();
+      })
+    );
+  });
+  refreshProfileLucideIcons();
+}
+
+function clearIdentityUploadSelection() {
+  const st = companionProfileUploadState;
+  revokeBlobUrl(st.identityPreviewUrl);
+  st.identityFile = null;
+  st.identityPreviewUrl = null;
+  const input = document.getElementById('identity-image-file');
+  if (input) input.value = '';
+  renderIdentityThumbPreview();
+}
+
+function clearPortraitUploadSelection() {
+  const st = companionProfileUploadState;
+  revokeBlobUrl(st.portraitPreviewUrl);
+  st.portraitFile = null;
+  st.portraitPreviewUrl = null;
+  const input = document.getElementById('portrait-image-file');
+  if (input) input.value = '';
+  renderPortraitThumbPreview();
+}
+
+function resetCompanionProfileUploadState() {
+  const st = companionProfileUploadState;
+  revokeBlobUrl(st.identityPreviewUrl);
+  revokeBlobUrl(st.portraitPreviewUrl);
+  st.albumPreviewUrls.forEach((u) => revokeBlobUrl(u));
+  st.identityFile = null;
+  st.portraitFile = null;
+  st.albumFiles = [];
+  st.retainedIntroUrls = [];
+  st.identityPreviewUrl = null;
+  st.portraitPreviewUrl = null;
+  st.albumPreviewUrls = [];
+  st.serverIdentityUrl = '';
+  st.serverPortraitUrl = '';
+  ['identity-image-file', 'portrait-image-file', 'intro-media-files'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  renderIdentityThumbPreview();
+  renderPortraitThumbPreview();
+  renderIntroAlbumPreview();
+}
+
+function applyProfileMediaFromServer(profile) {
+  const st = companionProfileUploadState;
+  st.serverIdentityUrl = profile.identityImageUrl || '';
+  st.serverPortraitUrl = profile.portraitImageUrl || '';
+  st.retainedIntroUrls = splitIntroMediaUrlString(profile.introMediaUrls);
+  renderIdentityThumbPreview();
+  renderPortraitThumbPreview();
+  renderIntroAlbumPreview();
+}
+
+function bindDropzone(zoneEl, inputEl, onPickFiles) {
+  if (!zoneEl || !inputEl) return;
+  const activate = () => zoneEl.classList.add('ring-2', 'ring-violet-400', 'ring-offset-2');
+  const deactivate = () => zoneEl.classList.remove('ring-2', 'ring-violet-400', 'ring-offset-2');
+
+  zoneEl.addEventListener('click', () => inputEl.click());
+  zoneEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      inputEl.click();
+    }
+  });
+  zoneEl.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    activate();
+  });
+  zoneEl.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    if (!zoneEl.contains(e.relatedTarget)) deactivate();
+  });
+  zoneEl.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    deactivate();
+    const files = e.dataTransfer?.files;
+    if (files?.length) onPickFiles(files);
+  });
+}
+
+function initCompanionProfileUploads() {
+  if (companionProfileUploadInited) return;
+  if (document.body.dataset.page !== 'companion-profile') return;
+  const idInput = document.getElementById('identity-image-file');
+  const portraitInput = document.getElementById('portrait-image-file');
+  const albumInput = document.getElementById('intro-media-files');
+  if (!idInput || !portraitInput || !albumInput) return;
+  companionProfileUploadInited = true;
+
+  const idZone = document.getElementById('identity-image-dropzone');
+  const portraitZone = document.getElementById('portrait-image-dropzone');
+  const albumZone = document.getElementById('intro-media-dropzone');
+
+  bindDropzone(idZone, idInput, (files) => {
+    const f = files[0];
+    if (!f || !f.type.startsWith('image/')) {
+      showAlert('Vui lòng chọn file ảnh cho CCCD.', 'warning');
+      return;
+    }
+    const st = companionProfileUploadState;
+    revokeBlobUrl(st.identityPreviewUrl);
+    st.identityFile = f;
+    st.identityPreviewUrl = URL.createObjectURL(f);
+    idInput.value = '';
+    renderIdentityThumbPreview();
+  });
+
+  idInput.addEventListener('change', () => {
+    const f = idInput.files?.[0];
+    if (!f) return;
+    if (!f.type.startsWith('image/')) {
+      showAlert('Vui lòng chọn file ảnh cho CCCD.', 'warning');
+      idInput.value = '';
+      return;
+    }
+    const st = companionProfileUploadState;
+    revokeBlobUrl(st.identityPreviewUrl);
+    st.identityFile = f;
+    st.identityPreviewUrl = URL.createObjectURL(f);
+    renderIdentityThumbPreview();
+  });
+
+  bindDropzone(portraitZone, portraitInput, (files) => {
+    const f = files[0];
+    if (!f || !f.type.startsWith('image/')) {
+      showAlert('Vui lòng chọn file ảnh chân dung.', 'warning');
+      return;
+    }
+    const st = companionProfileUploadState;
+    revokeBlobUrl(st.portraitPreviewUrl);
+    st.portraitFile = f;
+    st.portraitPreviewUrl = URL.createObjectURL(f);
+    portraitInput.value = '';
+    renderPortraitThumbPreview();
+  });
+
+  portraitInput.addEventListener('change', () => {
+    const f = portraitInput.files?.[0];
+    if (!f) return;
+    if (!f.type.startsWith('image/')) {
+      showAlert('Vui lòng chọn file ảnh chân dung.', 'warning');
+      portraitInput.value = '';
+      return;
+    }
+    const st = companionProfileUploadState;
+    revokeBlobUrl(st.portraitPreviewUrl);
+    st.portraitFile = f;
+    st.portraitPreviewUrl = URL.createObjectURL(f);
+    renderPortraitThumbPreview();
+  });
+
+  const acceptAlbumMime = (f) => f.type.startsWith('image/') || f.type.startsWith('video/');
+
+  bindDropzone(albumZone, albumInput, (files) => {
+    const st = companionProfileUploadState;
+    const incoming = Array.from(files).filter(acceptAlbumMime);
+    if (!incoming.length) {
+      showAlert('Chỉ chấp nhận ảnh hoặc video cho album.', 'warning');
+      return;
+    }
+    let added = 0;
+    for (const f of incoming) {
+      if (st.albumFiles.length >= MAX_INTRO_MEDIA_FILES_PER_SAVE) break;
+      st.albumFiles.push(f);
+      st.albumPreviewUrls.push(URL.createObjectURL(f));
+      added += 1;
+    }
+    if (added < incoming.length) {
+      showAlert(`Chỉ thêm được tối đa ${MAX_INTRO_MEDIA_FILES_PER_SAVE} file mới mỗi lần lưu.`, 'info');
+    }
+    albumInput.value = '';
+    renderIntroAlbumPreview();
+  });
+
+  albumInput.addEventListener('change', () => {
+    const st = companionProfileUploadState;
+    const incoming = Array.from(albumInput.files || []).filter(acceptAlbumMime);
+    if (!incoming.length && albumInput.files?.length) {
+      showAlert('Chỉ chấp nhận ảnh hoặc video cho album.', 'warning');
+      albumInput.value = '';
+      return;
+    }
+    let added = 0;
+    for (const f of incoming) {
+      if (st.albumFiles.length >= MAX_INTRO_MEDIA_FILES_PER_SAVE) break;
+      st.albumFiles.push(f);
+      st.albumPreviewUrls.push(URL.createObjectURL(f));
+      added += 1;
+    }
+    if (added < incoming.length) {
+      showAlert(`Chỉ thêm được tối đa ${MAX_INTRO_MEDIA_FILES_PER_SAVE} file mới mỗi lần lưu.`, 'info');
+    }
+    albumInput.value = '';
+    renderIntroAlbumPreview();
+  });
+
+  refreshProfileLucideIcons();
+}
+
+async function putCompanionIdentityFormData(formData) {
+  const token = localStorage.getItem('token');
+  const res = await fetch('/api/companions/me/identity', {
+    method: 'PUT',
+    credentials: 'include',
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: formData,
+  });
+  const text = await res.text();
+  let body = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch (_) {
+    body = { message: text };
+  }
+  if (!res.ok) {
+    throw new Error(body?.message || text || 'Cập nhật định danh thất bại.');
+  }
+  return body;
+}
+
 async function loadProfile() {
   try {
     const profile = await getJson('/api/companions/me/profile');
@@ -238,9 +596,6 @@ async function loadProfile() {
     const rv = document.getElementById('rental-venues');
     if (rv) rv.value = profile.rentalVenues || '';
     document.getElementById('identity-number').value = profile.identityNumber || '';
-    document.getElementById('identity-image-url').value = profile.identityImageUrl || '';
-    document.getElementById('portrait-image-url').value = profile.portraitImageUrl || '';
-    document.getElementById('intro-media-urls').value = profile.introMediaUrls || '';
     document.getElementById('skills').value = profile.skills || '';
     document.getElementById('online-toggle').checked = !!(profile.onlineStatus ?? profile.online);
     const statusEl = document.getElementById('companion-status');
@@ -248,6 +603,23 @@ async function loadProfile() {
       statusEl.className = `badge ${statusBadgeClass(profile.status)}`;
       statusEl.textContent = profile.status || 'N/A';
     }
+    revokeBlobUrl(companionProfileUploadState.identityPreviewUrl);
+    revokeBlobUrl(companionProfileUploadState.portraitPreviewUrl);
+    companionProfileUploadState.albumPreviewUrls.forEach((u) => revokeBlobUrl(u));
+    companionProfileUploadState.identityFile = null;
+    companionProfileUploadState.portraitFile = null;
+    companionProfileUploadState.albumFiles = [];
+    companionProfileUploadState.identityPreviewUrl = null;
+    companionProfileUploadState.portraitPreviewUrl = null;
+    companionProfileUploadState.albumPreviewUrls = [];
+    const idIn = document.getElementById('identity-image-file');
+    const prIn = document.getElementById('portrait-image-file');
+    const alIn = document.getElementById('intro-media-files');
+    if (idIn) idIn.value = '';
+    if (prIn) prIn.value = '';
+    if (alIn) alIn.value = '';
+    applyProfileMediaFromServer(profile);
+    refreshProfileLucideIcons();
   } catch (err) {
     showAlert(`Không thể tải hồ sơ: ${err.message || err}`, 'danger');
     document.getElementById('bio').value = '';
@@ -261,6 +633,7 @@ async function loadProfile() {
       statusEl.className = 'badge text-bg-secondary';
       statusEl.textContent = 'N/A';
     }
+    resetCompanionProfileUploadState();
   }
 }
 
@@ -278,15 +651,55 @@ async function saveProfile(e) {
   };
   try {
     await sendJson('/api/companions/me/profile', 'PUT', payload);
-    await sendJson('/api/companions/me/identity', 'PUT', {
-      identityNumber: document.getElementById('identity-number').value.trim(),
-      identityImageUrl: document.getElementById('identity-image-url').value.trim(),
-      portraitImageUrl: document.getElementById('portrait-image-url').value.trim(),
+
+    const st = companionProfileUploadState;
+    const fd = new FormData();
+    fd.append('identityNumber', document.getElementById('identity-number').value.trim());
+    fd.append('introMediaUrls', st.retainedIntroUrls.join(','));
+    if (st.identityFile) {
+      fd.append('identityImage', st.identityFile, st.identityFile.name);
+    }
+    if (st.portraitFile) {
+      fd.append('avatar', st.portraitFile, st.portraitFile.name);
+    }
+    st.albumFiles.forEach((file) => {
+      fd.append('introMedia', file, file.name);
     });
+
+    const identityJson = await putCompanionIdentityFormData(fd);
+
     await sendJson('/api/companions/me/media-skills', 'PUT', {
-      introMediaUrls: document.getElementById('intro-media-urls').value.trim(),
       skills: document.getElementById('skills').value.trim(),
     });
+
+    if (identityJson?.companion) {
+      const c = identityJson.companion;
+      st.serverIdentityUrl = c.identityImageUrl || st.serverIdentityUrl;
+      st.serverPortraitUrl = c.portraitImageUrl || c.avatarUrl || st.serverPortraitUrl;
+      if (c.introMediaUrls != null) {
+        st.retainedIntroUrls = splitIntroMediaUrlString(c.introMediaUrls);
+      }
+    }
+
+    revokeBlobUrl(st.identityPreviewUrl);
+    revokeBlobUrl(st.portraitPreviewUrl);
+    st.albumPreviewUrls.forEach((u) => revokeBlobUrl(u));
+    st.identityFile = null;
+    st.portraitFile = null;
+    st.albumFiles = [];
+    st.identityPreviewUrl = null;
+    st.portraitPreviewUrl = null;
+    st.albumPreviewUrls = [];
+    const idIn = document.getElementById('identity-image-file');
+    const prIn = document.getElementById('portrait-image-file');
+    const alIn = document.getElementById('intro-media-files');
+    if (idIn) idIn.value = '';
+    if (prIn) prIn.value = '';
+    if (alIn) alIn.value = '';
+    renderIdentityThumbPreview();
+    renderPortraitThumbPreview();
+    renderIntroAlbumPreview();
+
     showAlert('Đã cập nhật hồ sơ companion.');
     await loadProfile();
   } catch (err) {
@@ -444,7 +857,7 @@ function ensureSosModal() {
 }
 
 function openSosModal(booking) {
-  const bookingId = Number(booking?.id || 0);
+  const bookingId = booking?.id || booking?._id;
   if (!bookingId) {
     showAlert('Không tìm thấy thông tin booking để gửi SOS.', 'danger');
     return;
@@ -635,7 +1048,8 @@ async function loadIncomeStats() {
 
 async function loadServicePrices() {
   const rows = document.getElementById('service-price-body');
-  const data = await getJson('/api/companions/me/service-prices');
+  const raw = await getJson('/api/companions/me/service-prices');
+  const data = Array.isArray(raw) ? raw : raw.items ?? [];
   rows.innerHTML = '';
   if (!data.length) {
     rows.innerHTML = '<tr><td colspan="4" class="text-muted">Chưa có bảng giá.</td></tr>';
@@ -649,7 +1063,7 @@ async function loadServicePrices() {
             <td>${escapeHtml(item.description || '')}</td>
             <td class="text-end"><button class="btn btn-sm btn-outline-danger">Xóa</button></td>`;
     tr.querySelector('button').addEventListener('click', async () => {
-      await fetch(`/api/companions/me/service-prices/${item.id}`, { method: 'DELETE' });
+      await fetch(`/api/companions/me/service-prices/${item.id || item._id}`, { method: 'DELETE' });
       await loadServicePrices();
       showAlert('Đã xóa bảng giá.');
     });
@@ -726,12 +1140,23 @@ async function saveBankAccount(e) {
 }
 
 async function bootstrap() {
+  let auth;
   try {
-    const auth = await getJson('/api/auth/me');
-    if (!auth.authenticated) {
-      window.location.href = '../user/login.html';
-      return;
-    }
+    auth = await getJson('/api/auth/me');
+  } catch {
+    window.location.href = '../user/login.html';
+    return;
+  }
+  if (!auth?.authenticated) {
+    window.location.href = '../user/login.html';
+    return;
+  }
+  if (auth.role !== 'COMPANION') {
+    window.location.href = '../user/index.html';
+    return;
+  }
+
+  try {
     const authUserEl = document.getElementById('auth-user');
     if (authUserEl) {
       authUserEl.textContent = `Xin chào, ${auth.username}`;
@@ -836,6 +1261,7 @@ async function bootstrap() {
       tasks.push(loadBookingWorkflow(), loadIncomeStats(), loadCompanionDashboardCharts());
     }
     if (page === 'companion-profile') {
+      initCompanionProfileUploads();
       tasks.push(loadProfile());
     }
     if (page === 'companion-operations') {
@@ -853,9 +1279,14 @@ async function bootstrap() {
     if (page === 'companion-chat') {
       tasks.push(initCompanionChatPage());
     }
-    await Promise.all(tasks);
-  } catch (_) {
-    window.location.href = '../user/login.html';
+    const results = await Promise.allSettled(tasks);
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') {
+        console.warn(`[companion] Tải trang thất bại (task #${i}):`, r.reason);
+      }
+    });
+  } catch (err) {
+    console.error('[companion] bootstrap:', err);
   }
 }
 
@@ -1000,7 +1431,7 @@ async function initCompanionChatPage() {
   const bookingIdText = document.getElementById('chat-booking-id-text');
   const threadTitle = document.getElementById('chat-thread-title');
   const threadListBox = document.getElementById('chat-thread-list');
-  let currentBookingId = Number(new URLSearchParams(window.location.search).get('bookingId') || 0);
+  let currentBookingId = new URLSearchParams(window.location.search).get('bookingId') || '';
   let threads = [];
   let chatStompSub = null;
   let chatPollTimer = null;
@@ -1015,7 +1446,7 @@ async function initCompanionChatPage() {
     if (!currentBookingId || !window.RealtimeStomp) return;
     try {
       await RealtimeStomp.connect();
-      chatStompSub = await RealtimeStomp.subscribeChat(currentBookingId, () => {
+      chatStompSub = await RealtimeStomp.subscribeChat(String(currentBookingId), () => {
         loadMessages();
       });
     } catch (e) {
@@ -1038,9 +1469,9 @@ async function initCompanionChatPage() {
   async function loadChatThreads() {
     const list = await getJson('/api/companions/me/bookings');
     threads = (Array.isArray(list) ? list : [])
-      .filter((b) => Number(b?.id || 0) > 0)
+      .filter((b) => Boolean(b?.id || b?._id))
       .map((b) => ({
-        bookingId: Number(b.id),
+        bookingId: String(b.id || b._id),
         partnerName: b.customer?.fullName || b.customer?.username || `User #${b.customer?.id || '-'}`,
         status: b.status || '-',
         bookingTime: b.bookingTime,
@@ -1053,7 +1484,7 @@ async function initCompanionChatPage() {
       return currentBookingId;
     }
     const preferred = threads.find((t) => ['IN_PROGRESS', 'ACCEPTED', 'PENDING', 'COMPLETED'].includes(t.status));
-    return preferred ? preferred.bookingId : threads[0]?.bookingId || 0;
+    return preferred ? preferred.bookingId : threads[0]?.bookingId || '';
   }
 
   function renderThreadList() {
@@ -1065,7 +1496,7 @@ async function initCompanionChatPage() {
     threadListBox.innerHTML = `<div class="list-group list-group-flush">${threads
       .map((t) => {
         const active = t.bookingId === currentBookingId ? 'bg-light' : '';
-        return `<button type="button" class="list-group-item list-group-item-action border-0 border-bottom ${active} chat-thread-item" data-booking-id="${t.bookingId}">
+        return `<button type="button" class="list-group-item list-group-item-action border-0 border-bottom ${active} chat-thread-item" data-booking-id="${escapeHtml(t.bookingId)}">
                         <div class="fw-semibold">${escapeHtml(t.partnerName)}</div>
                         <div class="small text-muted">#${t.bookingId} • ${escapeHtml(t.status)}</div>
                     </button>`;
@@ -1073,7 +1504,7 @@ async function initCompanionChatPage() {
       .join('')}</div>`;
     threadListBox.querySelectorAll('.chat-thread-item').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        currentBookingId = Number(btn.getAttribute('data-booking-id'));
+        currentBookingId = btn.getAttribute('data-booking-id') || '';
         updateThreadHeader();
         renderThreadList();
         await loadMessages();

@@ -95,6 +95,11 @@ body {
     background: rgba(251, 191, 36, 0.15);
 }
 
+/* Tailwind CDN thêm `.collapse { visibility: collapse }` — làm vỡ Bootstrap `.navbar-collapse.collapse` */
+.navbar .navbar-collapse.collapse {
+    visibility: visible !important;
+}
+
 .card {
     border: 0 !important;
     border-radius: var(--c-radius-xl) !important;

@@ -13,6 +13,12 @@ function fileFilter(req, file, cb) {
     }
     return cb(null, true);
   }
+  if (file.fieldname === 'introMedia') {
+    if (IMAGE_MIME.test(file.mimetype) || VIDEO_MIME.test(file.mimetype)) {
+      return cb(null, true);
+    }
+    return cb(new Error('Album chỉ chấp nhận ảnh (JPEG, PNG, WebP) hoặc video (MP4, WebM, MOV).'));
+  }
   if (file.fieldname === 'introVideo') {
     if (!VIDEO_MIME.test(file.mimetype)) {
       return cb(new Error('Video giới thiệu chỉ chấp nhận MP4, WebM hoặc MOV.'));
@@ -30,10 +36,13 @@ const upload = multer({
   limits: { fileSize: MAX_VIDEO_BYTES },
 });
 
+const MAX_INTRO_MEDIA = 12;
+
 const fields = [
   { name: 'identityImage', maxCount: 1 },
   { name: 'avatar', maxCount: 1 },
   { name: 'introVideo', maxCount: 1 },
+  { name: 'introMedia', maxCount: MAX_INTRO_MEDIA },
 ];
 
 export function identityUploadMiddleware(req, res, next) {
@@ -56,10 +65,22 @@ export function identityUploadMiddleware(req, res, next) {
       }
       return null;
     };
+    const introList = Array.isArray(files?.introMedia) ? files.introMedia : [];
+    let introErr = null;
+    for (let i = 0; i < introList.length; i++) {
+      const f = introList[i];
+      const max = VIDEO_MIME.test(f.mimetype) ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES;
+      const label = VIDEO_MIME.test(f.mimetype) ? `Video album #${i + 1}` : `Ảnh album #${i + 1}`;
+      if (f.size > max) {
+        introErr = `${label} vượt quá ${Math.round(max / (1024 * 1024))}MB.`;
+        break;
+      }
+    }
     const msg =
       checkSize(files?.identityImage, MAX_IMAGE_BYTES, 'Ảnh CCCD') ||
       checkSize(files?.avatar, MAX_IMAGE_BYTES, 'Ảnh đại diện') ||
-      checkSize(files?.introVideo, MAX_VIDEO_BYTES, 'Video giới thiệu');
+      checkSize(files?.introVideo, MAX_VIDEO_BYTES, 'Video giới thiệu') ||
+      introErr;
     if (msg) {
       return res.status(400).json({ message: msg });
     }

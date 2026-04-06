@@ -23,3 +23,12 @@ export const resetPasswordSchema = Joi.object({
   otp: Joi.string().trim().length(6).pattern(/^\d{6}$/).required(),
   newPassword: Joi.string().min(8).max(128).required(),
 });
+
+export const patchMeSchema = Joi.object({
+  fullName: Joi.string().trim().max(120).allow('', null),
+}).min(1);
+
+export const changePasswordSchema = Joi.object({
+  currentPassword: Joi.string().min(1).max(128).required(),
+  newPassword: Joi.string().min(6).max(128).required(),
+});

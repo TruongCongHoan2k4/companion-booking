@@ -7,6 +7,16 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" />
     <link rel="stylesheet" href="../../public/css/companion.css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      /* Tailwind `.collapse` = visibility:collapse — xung đột Bootstrap navbar `.collapse` */
+      tailwind.config = {
+        corePlugins: {
+          preflight: false,
+          visibility: false,
+        },
+      };
+    </script>
   </head>
   <body class="bg-light" data-page="companion-profile">
     <nav class="navbar navbar-expand-lg navbar-dark">
@@ -57,18 +67,53 @@
       </div>
     </nav>
     <main class="container py-4">
-      <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
+      <div class="d-flex justify-content-between align-items-start mb-4">
+        <div class="flex-grow-1 me-3">
           <h1 class="h3 mb-1 fw-bold">
             <i class="bi bi-person-circle me-2"></i>
             Hồ sơ Companion
           </h1>
           <p class="text-muted mb-0">Cập nhật thông tin cá nhân và thiết lập dịch vụ</p>
+          <ul class="nav nav-tabs mb-4" id="profileTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button
+                class="nav-link active"
+                id="profile-tab"
+                data-bs-toggle="tab"
+                data-bs-target="#tab-profile"
+                type="button"
+                role="tab"
+                aria-controls="tab-profile"
+                aria-selected="true"
+              >
+                <i class="bi bi-person-badge me-1"></i>
+                Hồ sơ dịch vụ
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button
+                class="nav-link"
+                id="account-tab"
+                data-bs-toggle="tab"
+                data-bs-target="#tab-account"
+                type="button"
+                role="tab"
+                aria-controls="tab-account"
+                aria-selected="false"
+                tabindex="-1"
+              >
+                <i class="bi bi-shield-lock me-1"></i>
+                Cài đặt tài khoản
+              </button>
+            </li>
+          </ul>
         </div>
         <span id="auth-user" class="badge text-bg-primary"></span>
       </div>
       <div id="alert-box"></div>
 
+      <div class="tab-content" id="profileTabsContent">
+        <div class="tab-pane fade show active" id="tab-profile" role="tabpanel" aria-labelledby="profile-tab" tabindex="0">
       <section class="card shadow-sm mb-4">
         <div class="card-body p-4">
           <h2 class="h5">
@@ -143,25 +188,110 @@
               <input id="identity-number" class="form-control" />
             </div>
             <div class="col-md-4">
-              <label for="identity-image-url" class="form-label">
+              <span class="form-label d-block mb-2">
                 <i class="bi bi-image me-1"></i>
-                URL CCCD/CMND
-              </label>
-              <input id="identity-image-url" class="form-control" />
+                Ảnh CCCD/CMND
+              </span>
+              <input
+                type="file"
+                id="identity-image-file"
+                class="visually-hidden"
+                accept="image/*"
+                tabindex="-1"
+                aria-label="Chọn ảnh CCCD"
+              />
+              <div
+                id="identity-image-dropzone"
+                class="group relative flex min-h-[140px] cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/80 px-4 py-4 text-center transition hover:border-violet-400 hover:bg-violet-50/50"
+                tabindex="0"
+                role="button"
+                aria-label="Kéo thả hoặc bấm để tải ảnh CCCD"
+              >
+                <i data-lucide="id-card" class="h-8 w-8 text-slate-400 group-hover:text-violet-500"></i>
+                <p class="mb-0 text-sm font-medium text-slate-600">Kéo thả hoặc bấm để chọn ảnh</p>
+                <p class="mb-0 text-xs text-slate-400">JPEG, PNG, WebP</p>
+                <button
+                  type="button"
+                  id="identity-image-browse"
+                  class="pointer-events-none mt-1 inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm"
+                >
+                  <i data-lucide="upload" class="h-3.5 w-3.5"></i>
+                  Tải ảnh lên
+                </button>
+              </div>
+              <div id="identity-image-preview" class="mt-2 flex flex-wrap gap-2"></div>
             </div>
             <div class="col-md-4">
-              <label for="portrait-image-url" class="form-label">
+              <span class="form-label d-block mb-2">
                 <i class="bi bi-camera me-1"></i>
-                URL ảnh chân dung
-              </label>
-              <input id="portrait-image-url" class="form-control" />
+                Ảnh chân dung
+              </span>
+              <input
+                type="file"
+                id="portrait-image-file"
+                class="visually-hidden"
+                accept="image/*"
+                tabindex="-1"
+                aria-label="Chọn ảnh chân dung"
+              />
+              <div
+                id="portrait-image-dropzone"
+                class="group relative flex min-h-[140px] cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/80 px-4 py-4 text-center transition hover:border-violet-400 hover:bg-violet-50/50"
+                tabindex="0"
+                role="button"
+                aria-label="Kéo thả hoặc bấm để tải ảnh chân dung"
+              >
+                <i data-lucide="user-round" class="h-8 w-8 text-slate-400 group-hover:text-violet-500"></i>
+                <p class="mb-0 text-sm font-medium text-slate-600">Kéo thả hoặc bấm để chọn ảnh</p>
+                <p class="mb-0 text-xs text-slate-400">JPEG, PNG, WebP</p>
+                <button
+                  type="button"
+                  id="portrait-image-browse"
+                  class="pointer-events-none mt-1 inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm"
+                >
+                  <i data-lucide="upload" class="h-3.5 w-3.5"></i>
+                  Tải ảnh lên
+                </button>
+              </div>
+              <div id="portrait-image-preview" class="mt-2 flex flex-wrap gap-2"></div>
             </div>
-            <div class="col-md-6">
-              <label for="intro-media-urls" class="form-label">
+            <div class="col-12">
+              <span class="form-label d-block mb-2">
                 <i class="bi bi-collection me-1"></i>
-                Album ảnh/video (phẩy phân cách)
-              </label>
-              <textarea id="intro-media-urls" class="form-control" rows="2"></textarea>
+                Album ảnh / video giới thiệu
+              </span>
+              <p class="text-muted small mb-2">
+                Có thể chọn nhiều file. Giữ nguyên mục đã lưu trên server hoặc xóa bằng nút × trên từng thumbnail.
+              </p>
+              <input
+                type="file"
+                id="intro-media-files"
+                class="visually-hidden"
+                accept="image/*,video/*"
+                multiple
+                tabindex="-1"
+                aria-label="Chọn album ảnh hoặc video"
+              />
+              <div
+                id="intro-media-dropzone"
+                class="group relative flex min-h-[160px] cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/80 px-4 py-5 text-center transition hover:border-violet-400 hover:bg-violet-50/50"
+                tabindex="0"
+                role="button"
+                aria-label="Kéo thả hoặc bấm để thêm ảnh hoặc video vào album"
+              >
+                <i data-lucide="images" class="h-9 w-9 text-slate-400 group-hover:text-violet-500"></i>
+                <p class="mb-0 text-sm font-medium text-slate-600">Kéo thả hoặc bấm để thêm file</p>
+                <p class="mb-0 text-xs text-slate-400">Ảnh: JPEG, PNG, WebP · Video: MP4, WebM, MOV</p>
+                <button
+                  type="button"
+                  id="intro-media-browse"
+                  class="pointer-events-none mt-1 inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm"
+                >
+                  <i data-lucide="folder-plus" class="h-3.5 w-3.5"></i>
+                  Chọn nhiều file
+                </button>
+              </div>
+              <div id="intro-media-preview" class="mt-3 flex flex-wrap gap-2"></div>
             </div>
             <div class="col-md-6">
               <label for="skills" class="form-label">
@@ -193,8 +323,46 @@
           </form>
         </div>
       </section>
+        </div>
+        <div class="tab-pane fade" id="tab-account" role="tabpanel" aria-labelledby="account-tab" tabindex="0">
+          <section class="card shadow-sm mb-4">
+            <div class="card-body p-4">
+              <h2 class="h5">
+                <i class="bi bi-shield-lock ms-3 me-2"></i>
+                Cài đặt tài khoản
+              </h2>
+              <form id="account-form" class="row g-3 mt-2">
+                <div class="col-12">
+                  <label for="account-fullname" class="form-label">Tên hiển thị</label>
+                  <input id="account-fullname" type="text" class="form-control" required />
+                </div>
+                <div class="col-12">
+                  <label for="account-contact" class="form-label">Email / Số điện thoại</label>
+                  <input id="account-contact" type="text" class="form-control bg-light" readonly disabled />
+                </div>
+                <div class="col-12">
+                  <label for="current-password" class="form-label">Mật khẩu hiện tại</label>
+                  <input id="current-password" type="password" class="form-control" required />
+                </div>
+                <div class="col-12">
+                  <label for="new-password" class="form-label">Mật khẩu mới</label>
+                  <input id="new-password" type="password" class="form-control" minlength="6" required />
+                </div>
+                <div class="col-12">
+                  <label for="confirm-password" class="form-label">Xác nhận mật khẩu</label>
+                  <input id="confirm-password" type="password" class="form-control" minlength="6" required />
+                </div>
+                <div class="col-12 mt-2">
+                  <button class="btn btn-primary" type="submit">Cập nhật tài khoản</button>
+                </div>
+              </form>
+            </div>
+          </section>
+        </div>
+      </div>
     </main>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
     <script src="../../public/js/realtime-stomp.js"></script>
     <script src="../../public/js/companion.js"></script>
   </body>
