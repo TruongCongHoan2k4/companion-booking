@@ -6,8 +6,11 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon server.js",
     "start": "node server.js",
-    "seed:dev": "node scripts/seedDevUsers.js",
-    "seed:real": "node scripts/seedRealisticData.js"
+    "seed": "node scripts/seed.js",
+    "seed:reset": "node scripts/seed.js --reset",
+    "seed:dev": "node scripts/seed.js --profile dev",
+    "seed:real": "node scripts/seed.js --profile realistic",
+    "seed:e2e": "cross-env SEED_RESET=1 node scripts/seed.js --profile e2e"
   },
   "keywords": [],
   "author": "",
@@ -31,6 +34,7 @@
     "socket.io": "^4.8.3"
   },
   "devDependencies": {
+    "cross-env": "^7.0.3",
     "nodemon": "^3.1.14"
   }
 }

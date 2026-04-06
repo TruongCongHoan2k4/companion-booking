@@ -473,7 +473,7 @@ async function initBookingPage(auth) {
   }
 
   companionSelect?.addEventListener('change', async () => {
-    await loadServicesByCompanion(Number(companionSelect.value));
+    await loadServicesByCompanion(String(companionSelect.value || '').trim());
   });
   serviceSelect?.addEventListener('change', () => {
     const selected = currentServices.find((s) => String(s.id) === String(serviceSelect.value));
@@ -483,7 +483,7 @@ async function initBookingPage(auth) {
     renderHoldAmountHint();
   });
   durationSelect?.addEventListener('change', renderHoldAmountHint);
-  await loadServicesByCompanion(Number(companionSelect.value));
+  await loadServicesByCompanion(String(companionSelect.value || '').trim());
   document.getElementById('bookingTime').value = toDateInputValue();
 
   const locationEnabled = document.getElementById('locationEnabled');
@@ -619,8 +619,8 @@ async function initBookingPage(auth) {
     })();
     const rentalVenue = (document.getElementById('rentalVenue')?.value || '').trim();
     const payload = {
-      companionId: Number(document.getElementById('companionId').value),
-      servicePriceId: Number(document.getElementById('servicePriceId').value),
+      companionId: String(document.getElementById('companionId').value || '').trim(),
+      servicePriceId: String(document.getElementById('servicePriceId').value || '').trim(),
       bookingTime: document.getElementById('bookingTime').value,
       duration: Number(document.getElementById('duration').value),
       rentalVenue,

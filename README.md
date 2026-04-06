@@ -61,3 +61,50 @@ npm run build --prefix frontend
 ```
 
 Kết quả: thư mục `frontend/dist/` (portal `index.html`, `pages/`, `public/`, `policy.html`). Xem trước: `npm run preview --prefix frontend` (cần chạy `build` trước).
+
+## Cypress E2E (full regression)
+
+### Chuẩn bị
+
+- Đảm bảo backend `.env` có `MONGO_URI` trỏ vào DB test (vì E2E sẽ **drop database** khi seed).
+- Cài dependencies:
+
+```bash
+npm install --prefix backend
+npm install --prefix frontend
+npm install
+```
+
+### Chạy E2E một lệnh (khuyến nghị)
+
+```bash
+npm run e2e:run
+```
+
+- Lệnh này sẽ:
+- drop DB + seed dữ liệu (`backend/scripts/seed.js` với `SEED_RESET=1`, profile `e2e`)
+- chạy backend port **3001** (`PORT=3001 npm run start --prefix backend`)
+- chạy frontend port **5174** (`npm run dev --prefix frontend -- --port 5174 --strictPort`)
+- chạy Cypress headless (`npm run cypress:run --prefix frontend`)
+
+### Chạy thủ công (tách bước)
+
+```bash
+npm run seed:e2e
+npm run start --prefix backend
+npm run dev --prefix frontend
+npm run cypress:run --prefix frontend
+```
+
+### Tài khoản E2E mặc định (seed)
+
+- ADMIN: `admin` / `123456`
+- CUSTOMER: `customer1` / `123456`
+- COMPANION: `companion1` / `123456`
+
+Bạn có thể override bằng env (tùy chọn):
+- `CYPRESS_API_URL` (mặc định `http://localhost:3000/api`)
+- `CYPRESS_BASE_URL` (mặc định `http://localhost:5173`)
+- `CYPRESS_E2E_ADMIN_USER`, `CYPRESS_E2E_ADMIN_PASSWORD`
+- `CYPRESS_E2E_CUSTOMER_USER`, `CYPRESS_E2E_CUSTOMER_PASSWORD`
+- `CYPRESS_E2E_COMPANION_USER`, `CYPRESS_E2E_COMPANION_PASSWORD`

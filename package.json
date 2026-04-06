@@ -4,9 +4,14 @@
   "version": "1.0.0",
   "description": "Fullstack companion booking — chạy backend + frontend cùng lúc",
   "scripts": {
-    "dev:all": "concurrently -n backend,frontend -c blue,green \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\""
+    "dev:all": "concurrently -n backend,frontend -c blue,green \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
+    "seed:e2e": "npm run seed:e2e --prefix backend",
+    "cypress:run": "npm run cypress:run --prefix frontend",
+    "cypress:open": "npm run cypress:open --prefix frontend",
+    "e2e:run": "concurrently -n seed,backend,frontend,cypress -c magenta,blue,green,yellow \"npm run seed:e2e\" \"cross-env PORT=3001 npm run start --prefix backend\" \"npm run dev --prefix frontend -- --port 5174 --strictPort\" \"cross-env CYPRESS_BASE_URL=http://localhost:5174 CYPRESS_API_URL=http://localhost:3001/api npm run cypress:run\""
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3"
   }
 }
